@@ -43,7 +43,7 @@ DEPOSIT_ADDRESSES = {
     "SOL": ""
 }
 
-ADMIN_USER_IDS = [7338429782]
+ADMIN_USER_IDS = [7338429782, 8346781181]
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
@@ -1097,19 +1097,13 @@ async def handle_callback(
             await query.answer("Only the seller can click this button!")
             return
 
-        payment_type = deal.get('payment_details_type', 'text')
-        if payment_type == 'photo':
-            photo_id = deal.get('payment_details')
-            deposit_text = build_deposit_message(deal, deal_id)
-            await query.message.delete()
-            await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=photo_id,
+        deposit_text = build_deposit_message(deal, deal_id)
+        if query.message.photo:
+            await query.edit_message_caption(
                 caption=deposit_text,
                 parse_mode="HTML"
             )
         else:
-            deposit_text = build_deposit_message(deal, deal_id)
             await query.edit_message_text(
                 text=deposit_text,
                 parse_mode="HTML"
@@ -1222,10 +1216,7 @@ async def handle_callback(
         deal['status'] = 'payment_received'
         save_deals()
 
-        await query.edit_message_text(
-            text="Payment confirmed by admin. Processing...",
-            parse_mode="HTML"
-        )
+        await query.message.delete()
 
         detected_msg = build_payment_detected_message(
             deal_id, deal_amount, deal_amount, str(deal_amount), currency
@@ -1357,11 +1348,12 @@ async def handle_photo(
         return
 
     for deal_id, deal in deals.items():
-        if deal.get('payment_details_msg_id') == reply_to_msg_id:
+        if (deal.get('payment_details_msg_id') == reply_to_msg_id and
+                deal.get('chat_id') == chat_id):
             seller_clean = deal['seller'].lstrip('@').lower()
 
             if username != seller_clean:
-                return
+                continue
 
             photo_file_id = message.photo[-1].file_id
             deal['payment_details'] = photo_file_id
@@ -1412,15 +1404,17 @@ async def handle_message(
         reply_to_msg_id = message.reply_to_message.message_id
         bot_info = await context.bot.get_me()
 
-        if message.reply_to_message.from_user.id != bot_info.id:
+        reply_from_user = message.reply_to_message.from_user
+        if reply_from_user is None or reply_from_user.id != bot_info.id:
             return
 
         for deal_id, deal in deals.items():
-            if deal.get('buyer_address_msg_id') == reply_to_msg_id:
+            if (deal.get('buyer_address_msg_id') == reply_to_msg_id and
+                    deal.get('chat_id') == chat_id):
                 buyer_clean = deal['buyer'].lstrip('@').lower()
 
                 if username != buyer_clean:
-                    return
+                    continue
 
                 deal['buyer_address'] = text
                 deal['status'] = 'pending_seller_address'
@@ -1455,11 +1449,12 @@ async def handle_message(
                 save_deals()
                 return
 
-            if deal.get('seller_address_msg_id') == reply_to_msg_id:
+            if (deal.get('seller_address_msg_id') == reply_to_msg_id and
+                    deal.get('chat_id') == chat_id):
                 seller_clean = deal['seller'].lstrip('@').lower()
 
                 if username != seller_clean:
-                    return
+                    continue
 
                 deal['seller_address'] = text
                 deal['status'] = 'pending_payment_details'
@@ -1489,11 +1484,12 @@ async def handle_message(
                 save_deals()
                 return
 
-            if deal.get('payment_details_msg_id') == reply_to_msg_id:
+            if (deal.get('payment_details_msg_id') == reply_to_msg_id and
+                    deal.get('chat_id') == chat_id):
                 seller_clean = deal['seller'].lstrip('@').lower()
 
                 if username != seller_clean:
-                    return
+                    continue
 
                 deal['payment_details'] = text
                 deal['payment_details_type'] = 'text'
