@@ -1586,6 +1586,9 @@ async def handle_callback(
             f"your LOSS!"
         )
 
+        # Remove buttons from original message
+        await query.edit_message_reply_markup(reply_markup=None)
+
         keyboard = [
             [InlineKeyboardButton(
                 "Yes, I am Responsible!",
@@ -1618,6 +1621,9 @@ async def handle_callback(
         if username != seller_clean:
             await query.answer("Only the seller can confirm release!")
             return
+
+        # Remove buttons from confirmation message
+        await query.edit_message_reply_markup(reply_markup=None)
 
         seller = deal['seller']
         buyer = deal['buyer']
