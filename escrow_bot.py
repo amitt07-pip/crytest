@@ -2246,6 +2246,80 @@ async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(example_text)
 
 
+async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove all members from the group and mark deal as completed."""
+    global userbot_client, deals, rooms
+
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    room_num = get_room_by_channel_id(chat_id)
+
+    for deal_id, deal in list(deals.items()):
+        if deal.get('channel_id') == chat_id:
+            del deals[deal_id]
+            log_info(f"Deal #{deal_id} marked as completed (cleaned)")
+    save_deals()
+
+    if room_num:
+        mark_room_free(room_num)
+        log_info(f"Room {room_num} marked as free")
+
+    kicked_count = 0
+    try:
+        bot_info = await context.bot.get_me()
+        bot_id = bot_info.id
+
+        userbot_me = await userbot_client.get_me()
+        userbot_id = userbot_me.id
+
+        protected_ids = set(ADMIN_USER_IDS + [bot_id, userbot_id, 6662820986])
+
+        try:
+            from telethon.tl.functions.channels import GetParticipantsRequest
+            from telethon.tl.types import ChannelParticipantsRecent
+            participants = await userbot_client(GetParticipantsRequest(
+                channel=chat_id,
+                filter=ChannelParticipantsRecent(),
+                offset=0,
+                limit=100,
+                hash=0
+            ))
+
+            for user in participants.users:
+                if user.id not in protected_ids:
+                    try:
+                        kick_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=True
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=chat_id,
+                            participant=user.id,
+                            banned_rights=kick_rights
+                        ))
+                        kicked_count += 1
+                    except Exception as kick_error:
+                        log_warning(f"Could not kick user {user.id}: {kick_error}")
+        except Exception as get_error:
+            log_warning(f"Could not get participants: {get_error}")
+
+    except Exception as e:
+        log_error(f"Error in clean command: {e}")
+
+    await update.message.reply_text(
+        f"Room cleaned! Removed {kicked_count} member(s). "
+        f"Room is now available for new deals."
+    )
+
+
 async def main():
     load_allowed_users()
     load_group_data()
@@ -2269,6 +2343,7 @@ async def main():
     app.add_handler(CommandHandler("escrow", escrow))
     app.add_handler(CommandHandler("setup_rooms", setup_rooms))
     app.add_handler(CommandHandler("exampleform", exampleform))
+    app.add_handler(CommandHandler("clean", clean))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
