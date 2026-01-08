@@ -1597,7 +1597,8 @@ async def handle_callback(
             )]
         ]
 
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
             text=confirm_msg,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
@@ -1646,10 +1647,11 @@ async def handle_callback(
             f"<code>Deal done successfully with @Username using escrow "
             f"@CryptoIndiaUnited.</code>\n\n"
             f"Please use /clean before leaving the group.\n\n"
-            f"<i>Have a Nice Day!😊</i>"
+            f"<i>Have a Nice Day!</i>"
         )
 
-        await query.edit_message_text(
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
             text=finished_msg,
             parse_mode="HTML"
         )
