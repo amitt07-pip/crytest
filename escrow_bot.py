@@ -502,9 +502,11 @@ def get_deal_buttons(deal_id):
         [
             InlineKeyboardButton(
                 "Release Payment", callback_data=f"release_{deal_id}"
-            ),
+            )
+        ],
+        [
             InlineKeyboardButton(
-                "Partial Release", callback_data=f"partial_{deal_id}"
+                "Partial Release Payment", callback_data=f"partial_{deal_id}"
             )
         ],
         [
