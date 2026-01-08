@@ -46,6 +46,7 @@ ADMIN_USER_IDS = []
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
+HELIUS_API_KEY = os.environ.get("HELIUS_API_KEY", "")
 
 USDT_CONTRACTS = {
     "BSC": "0x55d398326f99059fF775485246999027B3197955",
@@ -397,8 +398,11 @@ async def check_polygon_transactions(deposit_address, usdt_contract):
 
 
 async def check_solana_transactions(deposit_address):
-    """Check Solana blockchain for USDT transactions using public RPC."""
-    rpc_url = "https://api.mainnet-beta.solana.com"
+    """Check Solana blockchain for USDT transactions using Helius API."""
+    if HELIUS_API_KEY:
+        rpc_url = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
+    else:
+        rpc_url = "https://api.mainnet-beta.solana.com"
 
     payload = {
         "jsonrpc": "2.0",
@@ -426,7 +430,8 @@ async def check_solana_transactions(deposit_address):
                             "method": "getTransaction",
                             "params": [
                                 sig.get("signature"),
-                                {"encoding": "jsonParsed"}
+                                {"encoding": "jsonParsed",
+                                 "maxSupportedTransactionVersion": 0}
                             ]
                         }
                         async with session.post(
@@ -441,7 +446,7 @@ async def check_solana_transactions(deposit_address):
 
                     return transactions
     except Exception as e:
-        print(f"Solana RPC error: {e}")
+        print(f"Solana/Helius API error: {e}")
 
     return []
 
