@@ -1208,14 +1208,57 @@ async def handle_callback(
             return
 
         deal = deals[deal_id]
+
+        if deal_id in active_monitors:
+            del active_monitors[deal_id]
+
+        deal_amount = float(deal.get('amount_crypto', '0'))
+        currency = deal['currency']
+
+        deal['received_amount'] = deal_amount
         deal['admin_confirmed'] = True
-        deal['status'] = 'completed'
+        deal['status'] = 'payment_received'
         save_deals()
 
         await query.edit_message_text(
-            text="Payment confirmed by admin. Deal completed!",
+            text="Payment confirmed by admin. Processing...",
             parse_mode="HTML"
         )
+
+        detected_msg = build_payment_detected_message(
+            deal_id, deal_amount, deal_amount, str(deal_amount), currency
+        )
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=detected_msg,
+            parse_mode="HTML"
+        )
+
+        received_msg = build_usdt_received_message(deal, deal_id, deal_amount)
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=received_msg,
+            parse_mode="HTML",
+            reply_markup=get_deal_buttons(deal_id)
+        )
+
+        payment_type = deal.get('payment_details_type', 'text')
+        if payment_type == 'photo':
+            photo_id = deal.get('payment_details')
+            details_msg = build_payment_details_message(deal, deal_id)
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=photo_id,
+                caption=details_msg,
+                parse_mode="HTML"
+            )
+        else:
+            details_msg = build_payment_details_message(deal, deal_id)
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text=details_msg,
+                parse_mode="HTML"
+            )
         return
 
     if data.startswith("admincancel_"):
