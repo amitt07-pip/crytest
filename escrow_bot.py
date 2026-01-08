@@ -1258,28 +1258,32 @@ async def handle_callback(
         summary_text = build_deal_summary(deal, deal_id, both_confirmed)
 
         if both_confirmed:
+            chat_id = query.message.chat_id
             payment_type = deal.get('payment_details_type', 'text')
+            summary_msg_id = None
+
             if payment_type == 'photo':
                 photo_id = deal.get('payment_details')
                 await query.message.delete()
                 sent = await context.bot.send_photo(
-                    chat_id=query.message.chat_id,
+                    chat_id=chat_id,
                     photo=photo_id,
                     caption=summary_text,
                     parse_mode="HTML"
                 )
-                deal['summary_msg_id'] = sent.message_id
+                summary_msg_id = sent.message_id
+                deal['summary_msg_id'] = summary_msg_id
             else:
                 await query.edit_message_text(
                     text=summary_text,
                     parse_mode="HTML"
                 )
+                summary_msg_id = query.message.message_id
 
             try:
-                msg_id = query.message.message_id
-                msg_to_pin = deal.get('summary_msg_id', msg_id)
+                msg_to_pin = deal.get('summary_msg_id', summary_msg_id)
                 await context.bot.pin_chat_message(
-                    chat_id=query.message.chat_id,
+                    chat_id=chat_id,
                     message_id=msg_to_pin,
                     disable_notification=True
                 )
@@ -1299,7 +1303,7 @@ async def handle_callback(
                 try:
                     with open(qr_path, 'rb') as qr_file:
                         sent_deposit = await context.bot.send_photo(
-                            chat_id=query.message.chat_id,
+                            chat_id=chat_id,
                             photo=qr_file,
                             caption=deposit_text,
                             parse_mode="HTML",
@@ -1307,14 +1311,14 @@ async def handle_callback(
                         )
                 except FileNotFoundError:
                     sent_deposit = await context.bot.send_message(
-                        chat_id=query.message.chat_id,
+                        chat_id=chat_id,
                         text=deposit_text,
                         parse_mode="HTML",
                         reply_markup=get_deposit_buttons(deal_id)
                     )
             else:
                 sent_deposit = await context.bot.send_message(
-                    chat_id=query.message.chat_id,
+                    chat_id=chat_id,
                     text=deposit_text,
                     parse_mode="HTML",
                     reply_markup=get_deposit_buttons(deal_id)
@@ -1322,7 +1326,34 @@ async def handle_callback(
 
             deal['deposit_msg_id'] = sent_deposit.message_id
             deal['status'] = 'pending_deposit'
+            deal['latest_msg_id'] = sent_deposit.message_id
             save_deals()
+
+            # Add CURRENT STAGE button to Both Confirmed message
+            channel_id_str = str(chat_id).replace("-100", "")
+            msg_link = f"https://t.me/c/{channel_id_str}/{sent_deposit.message_id}"
+            current_stage_keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("CURRENT STAGE", url=msg_link)]
+            ])
+
+            if payment_type == 'photo':
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=summary_msg_id,
+                        reply_markup=current_stage_keyboard
+                    )
+                except Exception:
+                    pass
+            else:
+                try:
+                    await context.bot.edit_message_reply_markup(
+                        chat_id=chat_id,
+                        message_id=summary_msg_id,
+                        reply_markup=current_stage_keyboard
+                    )
+                except Exception:
+                    pass
         else:
             payment_type = deal.get('payment_details_type', 'text')
             if payment_type == 'photo':
