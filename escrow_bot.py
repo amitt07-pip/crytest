@@ -278,39 +278,50 @@ def get_network_display_name(network):
     return mapping.get(network, network)
 
 
-def get_network_buttons(deal_id):
-    """Create network selection buttons."""
-    keyboard = [
-        [
-            InlineKeyboardButton(
-                "USDT[BSC]", callback_data=f"network_{deal_id}_BSC"
-            ),
-            InlineKeyboardButton(
-                "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "USDT[SOL]", callback_data=f"network_{deal_id}_SOL"
-            ),
-            InlineKeyboardButton(
-                "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON"
-            ),
-            InlineKeyboardButton(
-                "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "Cancel", callback_data=f"cancel_{deal_id}"
-            )
+def get_network_buttons(deal_id, currency="USDT"):
+    """Create network selection buttons based on currency."""
+    if currency == "USDC":
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"
+                ),
+                InlineKeyboardButton(
+                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Cancel", callback_data=f"cancel_{deal_id}"
+                )
+            ]
         ]
-    ]
+    else:
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "USDT[BSC]", callback_data=f"network_{deal_id}_BSC"
+                ),
+                InlineKeyboardButton(
+                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "Cancel", callback_data=f"cancel_{deal_id}"
+                )
+            ]
+        ]
     return InlineKeyboardMarkup(keyboard)
 
 
@@ -1926,7 +1937,7 @@ async def handle_message(
             chat_id=chat_id,
             text=msg,
             parse_mode="HTML",
-            reply_markup=get_network_buttons(deal_id)
+            reply_markup=get_network_buttons(deal_id, currency)
         )
 
 
