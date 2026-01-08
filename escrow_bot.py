@@ -2,19 +2,24 @@ import os
 import random
 import asyncio
 import json
-from telegram import Update, ChatJoinRequest
-from telegram.ext import (
+import nest_asyncio
+
+nest_asyncio.apply()
+
+from telegram import Update, ChatJoinRequest  # noqa: E402
+from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler
 )
-from telethon import TelegramClient
-from telethon.tl.functions.messages import (
-    CreateChatRequest, ExportChatInviteRequest, MigrateChatRequest
+from telethon import TelegramClient  # noqa: E402
+from telethon.tl.functions.messages import (  # noqa: E402
+    CreateChatRequest, ExportChatInviteRequest, MigrateChatRequest,
+    EditChatAboutRequest
 )
-from telethon.tl.functions.channels import (
-    ToggleJoinRequestRequest, EditAdminRequest, EditAboutRequest
+from telethon.tl.functions.channels import (  # noqa: E402
+    ToggleJoinRequestRequest, EditAdminRequest
 )
-from telethon.tl.types import ChatAdminRights
+from telethon.tl.types import ChatAdminRights  # noqa: E402
 
 
 API_ID = os.environ.get("API_ID")
@@ -83,8 +88,35 @@ async def create_escrow_group(
             title=group_title
         ))
 
-        chat = result.chats[0]
-        chat_id = chat.id
+        print(f"CreateChatRequest result type: {type(result)}")
+        print(f"CreateChatRequest result: {result}")
+
+        chat_id = None
+        if hasattr(result, 'chats') and result.chats:
+            chat = result.chats[0]
+            chat_id = chat.id
+        elif hasattr(result, 'updates'):
+            for update in result.updates:
+                if hasattr(update, 'chat_id'):
+                    chat_id = update.chat_id
+                    break
+                elif hasattr(update, 'peer'):
+                    if hasattr(update.peer, 'chat_id'):
+                        chat_id = update.peer.chat_id
+                        break
+
+        if chat_id is None:
+            dialogs = await userbot_client.get_dialogs(limit=5)
+            for dialog in dialogs:
+                if dialog.title == group_title:
+                    chat_id = dialog.id
+                    break
+
+        if chat_id is None:
+            print("Could not find chat_id from response")
+            return None, room_number, None
+
+        print(f"Found chat_id: {chat_id}")
 
         try:
             migrated = await userbot_client(MigrateChatRequest(
@@ -98,8 +130,8 @@ async def create_escrow_group(
             channel_id = chat_id
 
         try:
-            await userbot_client(EditAboutRequest(
-                channel=channel_id,
+            await userbot_client(EditChatAboutRequest(
+                peer=channel_id,
                 about="Join @CryptoIndiaUnited"
             ))
             print("Group description set")
