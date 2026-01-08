@@ -37,20 +37,26 @@ GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
-POLYGON_QR_IMAGE = "polygon_deposit_qr.jpg"
+POLYGON_QR_IMAGES = ["polygon_deposit_qr.jpg", "polygon_qr_2.jpg"]
 
 BSC_DEPOSIT_ADDRESSES = [
     "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
     "0xf282e789e835ed379aea84ece204d2d643e6774f"
 ]
 
+POLYGON_DEPOSIT_ADDRESSES = [
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+]
+
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
-    "POLYGON": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "POLYGON": POLYGON_DEPOSIT_ADDRESSES[0],
     "SOL": ""
 }
 
 bsc_address_index = 0
+polygon_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
 
@@ -330,6 +336,15 @@ def get_bsc_deposit_info():
     return address, qr_image
 
 
+def get_polygon_deposit_info():
+    """Get rotating Polygon deposit address and QR image."""
+    global polygon_address_index
+    address = POLYGON_DEPOSIT_ADDRESSES[polygon_address_index]
+    qr_image = POLYGON_QR_IMAGES[polygon_address_index]
+    polygon_address_index = (polygon_address_index + 1) % len(POLYGON_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -342,9 +357,13 @@ def build_deposit_message(deal, deal_id):
         deposit_address, qr_image = get_bsc_deposit_info()
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
+    elif network == "POLYGON":
+        deposit_address, qr_image = get_polygon_deposit_info()
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
     else:
         deposit_address = DEPOSIT_ADDRESSES.get(network, '')
-        qr_image = POLYGON_QR_IMAGE if network == "POLYGON" else None
+        qr_image = None
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
 
