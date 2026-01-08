@@ -36,14 +36,21 @@ ALLOWED_USERS_FILE = "allowed_users.json"
 GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
-BSC_QR_IMAGE = "bsc_deposit_qr.jpg"
+BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
 POLYGON_QR_IMAGE = "polygon_deposit_qr.jpg"
 
+BSC_DEPOSIT_ADDRESSES = [
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+]
+
 DEPOSIT_ADDRESSES = {
-    "BSC": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "BSC": BSC_DEPOSIT_ADDRESSES[0],
     "POLYGON": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
     "SOL": ""
 }
+
+bsc_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
 
@@ -314,6 +321,15 @@ def get_payment_check_buttons(deal_id):
     return InlineKeyboardMarkup(keyboard)
 
 
+def get_bsc_deposit_info():
+    """Get rotating BSC deposit address and QR image."""
+    global bsc_address_index
+    address = BSC_DEPOSIT_ADDRESSES[bsc_address_index]
+    qr_image = BSC_QR_IMAGES[bsc_address_index]
+    bsc_address_index = (bsc_address_index + 1) % len(BSC_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -322,7 +338,15 @@ def build_deposit_message(deal, deal_id):
     amount = deal.get('amount_crypto', '0')
     seller = deal['seller']
 
-    deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+    if network == "BSC":
+        deposit_address, qr_image = get_bsc_deposit_info()
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
+    else:
+        deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+        qr_image = POLYGON_QR_IMAGE if network == "POLYGON" else None
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
 
     msg = (
         f"Deal [{deal_id}]\n"
@@ -666,7 +690,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
 
     deal = deals[deal_id]
     network = deal.get('network', 'BSC')
-    deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+    deposit_address = deal.get('deposit_address', DEPOSIT_ADDRESSES.get(network, ''))
     deal_amount = deal.get('amount_crypto', '0')
     currency = deal['currency']
     start_time = asyncio.get_event_loop().time()
@@ -1152,7 +1176,7 @@ async def handle_callback(
 
             if network in ['BSC', 'POLYGON']:
                 import os
-                qr_image = BSC_QR_IMAGE if network == 'BSC' else POLYGON_QR_IMAGE
+                qr_image = deal.get('qr_image', POLYGON_QR_IMAGE)
                 qr_path = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
                     qr_image
