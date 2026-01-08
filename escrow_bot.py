@@ -36,9 +36,9 @@ DEALS_FILE = "deals.json"
 BSC_QR_IMAGE = "bsc_deposit_qr.jpg"
 
 DEPOSIT_ADDRESSES = {
-    "bsc": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
-    "polygon": "",
-    "sol": ""
+    "BSC": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "POLYGON": "",
+    "SOL": ""
 }
 
 ADMIN_USER_IDS = []
@@ -240,7 +240,7 @@ def get_payment_check_buttons(deal_id):
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
-    network = deal.get('network', 'bsc')
+    network = deal.get('network', 'BSC')
     network_name = get_network_display_name(network)
     amount = deal.get('amount_crypto', '0')
     seller = deal['seller']
@@ -668,9 +668,9 @@ async def handle_callback(
                 print(f"Could not pin message: {pin_error}")
 
             deposit_text = build_deposit_message(deal, deal_id)
-            network = deal.get('network', 'bsc')
+            network = deal.get('network', 'BSC')
 
-            if network == 'bsc':
+            if network == 'BSC':
                 import os
                 qr_path = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
