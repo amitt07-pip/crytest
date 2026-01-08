@@ -161,6 +161,98 @@ def get_cancel_only_button(deal_id):
     return InlineKeyboardMarkup(keyboard)
 
 
+def calculate_escrow_fee(amount_str):
+    """Calculate escrow fee: 0.5 or 0.2% of amount, whichever higher."""
+    try:
+        amount = float(amount_str.replace(',', '').strip())
+        percentage_fee = amount * 0.002
+        return max(0.5, percentage_fee)
+    except (ValueError, AttributeError):
+        return 0.5
+
+
+def get_confirm_buttons(deal_id):
+    """Create confirmation buttons for seller and buyer."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "Confirm[Seller]", callback_data=f"confirm_{deal_id}_seller"
+            ),
+            InlineKeyboardButton(
+                "Confirm[Buyer]", callback_data=f"confirm_{deal_id}_buyer"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Cancel", callback_data=f"cancel_{deal_id}"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_deal_summary(deal, deal_id):
+    """Build the deal summary message."""
+    currency = deal['currency']
+    network_name = get_network_display_name(deal.get('network', ''))
+    escrow_fee = calculate_escrow_fee(deal.get('amount_crypto', '0'))
+
+    seller_check = "✅" if deal.get('seller_confirmed') else ""
+    buyer_check = "✅" if deal.get('buyer_confirmed') else ""
+
+    if deal.get('seller_confirmed') and deal.get('buyer_confirmed'):
+        confirm_status = "Both Confirmed!!"
+    elif deal.get('seller_confirmed'):
+        confirm_status = "Seller Confirmed!! Waiting for Buyer confirmation..."
+    elif deal.get('buyer_confirmed'):
+        confirm_status = "Buyer Confirmed!! Waiting for Seller confirmation..."
+    else:
+        confirm_status = ""
+
+    payment_details = deal.get('payment_details', '')
+    payment_type = deal.get('payment_details_type', 'text')
+
+    msg = (
+        f"Deal [ID #{deal_id}]. Both parties, please review the deal details "
+        f"below carefully and confirm if everything is correct.\n\n"
+        f"⚠️BOTH of you <b>DO NOT MAKE ANY PAYMENT</b> until both parties "
+        f"have confirmed the details below and the bot prompts you to do so."
+        f"\n\n"
+        f"➤ <b>{currency} Seller:</b> {deal['seller']} {seller_check}\n"
+        f"➤ <b>{currency} Buyer:</b> {deal['buyer']} {buyer_check}\n"
+        f"➤ <b>Token:</b> {currency}\n"
+        f"➤ <b>Chain:</b> {network_name}\n"
+        f"➤ <b>Amount[{currency}]:</b> {deal.get('amount_crypto', '')}\n"
+        f"➤ <b>Amount[INR]:</b> {deal.get('amount_inr', '')}\n"
+        f"➤ <b>Payment Method:</b> {deal.get('payment_method', '')}\n"
+        f"➤ <b>Total Escrow Fees[{currency}]:</b> {escrow_fee:.2f}\n"
+        f"➤ <b>Release Address:</b> {deal.get('buyer_address', '')}\n"
+        f"➤ <b>Refund Address:</b> {deal.get('seller_address', '')}\n"
+        f"➤ <b>Time[Minute]:</b> {deal.get('time', '')}\n"
+        f"➤ <b>Payment Details:</b>\n"
+    )
+
+    if payment_type == 'text':
+        msg += f"{payment_details}\n\n"
+    else:
+        msg += "[See attached image]\n\n"
+
+    if confirm_status:
+        msg += f"{confirm_status}\n\n"
+
+    msg += (
+        f"🚫 <b>IMPORTANT:</b> {deal['seller']}, do <u>NOT</u> deposit any "
+        f"{currency}s to the addresses above.\n"
+        f"You will receive a separate <b>Escrow Deposit</b> Address after "
+        f"confirming the deal details.\n\n"
+        f"🔹 <b>Note to Buyer</b> ({deal['buyer']}): You can only withdraw "
+        f"{currency} on the <b>{network_name}</b> network as selected by "
+        f"the seller."
+    )
+
+    return msg
+
+
 async def init_userbot():
     global userbot_client
     userbot_client = TelegramClient("userbot_session", API_ID, API_HASH)
@@ -403,11 +495,16 @@ async def handle_callback(
 
         network_name = get_network_display_name(network)
         seller = deal['seller']
+        buyer = deal['buyer']
+        currency = deal['currency']
 
         new_text = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
             f"<b>{seller}</b> [Seller] has selected "
-            f"<b>{network_name}</b> as the deposit network for USDT."
+            f"<b>{network_name}</b> as the deposit network for {currency}.\n\n"
+            f"🔹<b>Note to Buyer ({buyer}):</b> You will only be able to "
+            f"withdraw {currency} on the <b>{network_name}</b> network "
+            f"as selected by the seller."
         )
 
         await query.edit_message_text(
@@ -416,13 +513,12 @@ async def handle_callback(
             reply_markup=get_cancel_only_button(deal_id)
         )
 
-        buyer = deal['buyer']
         chat_id = query.message.chat_id
 
         buyer_msg = (
             f"<b><u>Deal</u></b> #{deal_id}\n\n"
             f"{buyer} [Buyer] please <b>QUOTE</b> this message and reply "
-            f"with your <b>USDT {network_name}</b> address.\n"
+            f"with your <b>{currency} {network_name}</b> address.\n"
             f"Please be mindful that funds <b>cannot be recovered</b> "
             f"if sent to the wrong network address."
         )
@@ -437,18 +533,155 @@ async def handle_callback(
         save_deals()
         return
 
-    if data.startswith("cancel_"):
-        deal_id = data.split("_")[1]
+    if data.startswith("confirm_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        confirm_type = parts[2]
 
-        if deal_id in deals:
-            del deals[deal_id]
-            save_deals()
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
+
+        if confirm_type == "seller":
+            if username != seller_clean:
+                await query.answer("Only the seller can confirm!")
+                return
+            deal['seller_confirmed'] = True
+        elif confirm_type == "buyer":
+            if username != buyer_clean:
+                await query.answer("Only the buyer can confirm!")
+                return
+            deal['buyer_confirmed'] = True
+
+        save_deals()
+
+        summary_text = build_deal_summary(deal, deal_id)
+
+        if deal.get('seller_confirmed') and deal.get('buyer_confirmed'):
+            await query.edit_message_text(
+                text=summary_text,
+                parse_mode="HTML"
+            )
+
+            try:
+                await context.bot.pin_chat_message(
+                    chat_id=query.message.chat_id,
+                    message_id=query.message.message_id,
+                    disable_notification=True
+                )
+            except Exception as pin_error:
+                print(f"Could not pin message: {pin_error}")
+        else:
+            payment_type = deal.get('payment_details_type', 'text')
+            if payment_type == 'photo':
+                photo_id = deal.get('payment_details')
+                await query.message.delete()
+                sent = await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=photo_id,
+                    caption=summary_text,
+                    parse_mode="HTML",
+                    reply_markup=get_confirm_buttons(deal_id)
+                )
+                deal['summary_msg_id'] = sent.message_id
+                save_deals()
+            else:
+                await query.edit_message_text(
+                    text=summary_text,
+                    parse_mode="HTML",
+                    reply_markup=get_confirm_buttons(deal_id)
+                )
+        return
+
+    if data.startswith("cancel_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            await query.edit_message_text(
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+
+        if username != seller_clean:
+            await query.answer("Only the seller can cancel the deal!")
+            return
+
+        del deals[deal_id]
+        save_deals()
 
         await query.edit_message_text(
             text="Deal has been cancelled.",
             parse_mode="HTML"
         )
         return
+
+
+async def handle_photo(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """Handle photo messages - for payment details QR codes."""
+    global deals
+
+    message = update.message
+    if not message or not message.photo:
+        return
+
+    chat_id = message.chat_id
+    user = message.from_user
+    username = user.username.lower() if user.username else None
+
+    if not message.reply_to_message:
+        return
+
+    reply_to_msg_id = message.reply_to_message.message_id
+    bot_info = await context.bot.get_me()
+
+    if message.reply_to_message.from_user.id != bot_info.id:
+        return
+
+    for deal_id, deal in deals.items():
+        if deal.get('payment_details_msg_id') == reply_to_msg_id:
+            seller_clean = deal['seller'].lstrip('@').lower()
+
+            if username != seller_clean:
+                return
+
+            photo_file_id = message.photo[-1].file_id
+            deal['payment_details'] = photo_file_id
+            deal['payment_details_type'] = 'photo'
+            deal['status'] = 'pending_confirmation'
+            deal['seller_confirmed'] = False
+            deal['buyer_confirmed'] = False
+            save_deals()
+
+            buyer = deal['buyer']
+            await message.reply_text(
+                "Payment Details Successfully Saved!\n\n"
+                f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                f"given by the seller yet. Please wait for the Escrow Bot "
+                f"to prompt you before making any payment.",
+                parse_mode="HTML"
+            )
+
+            summary_text = build_deal_summary(deal, deal_id)
+            sent = await context.bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_file_id,
+                caption=summary_text,
+                parse_mode="HTML",
+                reply_markup=get_confirm_buttons(deal_id)
+            )
+            deal['summary_msg_id'] = sent.message_id
+            save_deals()
+            return
 
 
 async def handle_message(
@@ -520,12 +753,61 @@ async def handle_message(
                     return
 
                 deal['seller_address'] = text
-                deal['status'] = 'addresses_collected'
+                deal['status'] = 'pending_payment_details'
                 save_deals()
 
                 await message.reply_text(
                     "Refund Address Successfully Saved!",
                     parse_mode="HTML"
+                )
+
+                seller = deal['seller']
+                payment_msg = (
+                    f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                    f"{seller} [Seller], please <b>QUOTE</b> this message "
+                    f"and reply with your <b>Payment Details</b>.\n\n"
+                    f"Please make sure that all details are correct to avoid "
+                    f"any payment issues."
+                )
+
+                sent_msg = await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=payment_msg,
+                    parse_mode="HTML"
+                )
+
+                deal['payment_details_msg_id'] = sent_msg.message_id
+                save_deals()
+                return
+
+            if deal.get('payment_details_msg_id') == reply_to_msg_id:
+                seller_clean = deal['seller'].lstrip('@').lower()
+
+                if username != seller_clean:
+                    return
+
+                deal['payment_details'] = text
+                deal['payment_details_type'] = 'text'
+                deal['status'] = 'pending_confirmation'
+                deal['seller_confirmed'] = False
+                deal['buyer_confirmed'] = False
+                save_deals()
+
+                buyer = deal['buyer']
+                await message.reply_text(
+                    "Payment Details Successfully Saved!\n\n"
+                    f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                    f"given by the seller yet. Please wait for the Escrow Bot "
+                    f"to prompt you before making any payment.",
+                    parse_mode="HTML"
+                )
+
+                summary_text = build_deal_summary(deal, deal_id)
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=summary_text,
+                    parse_mode="HTML",
+                    reply_markup=get_confirm_buttons(deal_id)
                 )
                 return
 
@@ -728,6 +1010,9 @@ async def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, handle_message
+    ))
+    app.add_handler(MessageHandler(
+        filters.PHOTO, handle_photo
     ))
 
     print("Bot is running...")
