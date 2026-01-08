@@ -9,13 +9,19 @@ from datetime import datetime
 
 nest_asyncio.apply()
 
-# Configure logging
+# Configure logging - suppress HTTP request spam from libraries
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
+
+# Suppress noisy HTTP loggers
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext.Application").setLevel(logging.WARNING)
+logging.getLogger("telegram.ext._application").setLevel(logging.WARNING)
 
 
 def log_info(message):
@@ -2181,6 +2187,18 @@ async def main():
     load_group_data()
     load_deals()
     load_rooms()
+
+    # Log room status
+    total_rooms = len(rooms)
+    free_rooms = sum(1 for r in rooms.values() if r.get('status') == 'free')
+    busy_rooms = total_rooms - free_rooms
+    log_info(f"Rooms loaded: {total_rooms} total, {free_rooms} free, {busy_rooms} busy")
+
+    # Log active deals
+    active_deals = len(deals)
+    if active_deals > 0:
+        log_info(f"Active deals: {active_deals}")
+
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
