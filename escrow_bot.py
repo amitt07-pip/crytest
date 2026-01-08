@@ -883,9 +883,10 @@ async def create_escrow_group(
                 manage_call=True,
                 other=True
             )
+            founder_user = await userbot_client.get_entity("@TheTigerCubs")
             await userbot_client(EditAdminRequest(
                 channel=channel_id,
-                user_id=6662820986,
+                user_id=founder_user.id,
                 admin_rights=founder_rights,
                 rank="Founder"
             ))
