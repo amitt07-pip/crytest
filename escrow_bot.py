@@ -1547,6 +1547,101 @@ async def handle_callback(
         )
         return
 
+    if data.startswith("release_") and not data.startswith("release_confirm_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+
+        if username != seller_clean:
+            await query.answer("Only the seller can release payment!")
+            return
+
+        seller = deal['seller']
+        buyer = deal['buyer']
+        currency = deal['currency']
+
+        confirm_msg = (
+            f"<b><u>Deal</u></b> #{deal_id}\n\n"
+            f"{seller} Are you really Really REALLY Sure???\n"
+            f"<b>Your {currency}</b> will be sent to {buyer} and if you have "
+            f"not received your INR, then you yourself are responsible for "
+            f"your LOSS!"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton(
+                "Yes, I am Responsible!",
+                callback_data=f"release_confirm_{deal_id}"
+            )],
+            [InlineKeyboardButton(
+                "Dispute",
+                callback_data=f"dispute_{deal_id}"
+            )]
+        ]
+
+        await query.edit_message_text(
+            text=confirm_msg,
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    if data.startswith("release_confirm_"):
+        parts = data.split("_")
+        deal_id = parts[2]
+
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+
+        if username != seller_clean:
+            await query.answer("Only the seller can confirm release!")
+            return
+
+        seller = deal['seller']
+        buyer = deal['buyer']
+        currency = deal['currency']
+        amount = deal.get('amount_crypto', '0')
+        escrow_fee = calculate_escrow_fee(float(amount))
+        withdrawal_amount = float(amount) - escrow_fee
+        buyer_address = deal.get('buyer_address', 'N/A')
+
+        room_num = get_room_by_channel_id(query.message.chat_id)
+        if room_num:
+            mark_room_free(room_num)
+
+        del deals[deal_id]
+        save_deals()
+
+        finished_msg = (
+            f"<b><u>Deal</u></b> (#{deal_id}) FINISHED\n\n"
+            f"{buyer} [Buyer] | {seller} [Seller]\n"
+            f"Withdrawl of {withdrawal_amount:.2f} {currency} Finished!\n"
+            f"Tx Hash: {buyer_address}\n\n"
+            f"<b><i>We are thankful to you for using our Escrow service and "
+            f"we have a request. Please quote the invitation post by Bot in "
+            f"OTC section of @CryptoIndiaUnited and write a vouch for us. "
+            f"Below is a sample format which you may copy-paste and include "
+            f"buyer/seller name...</i></b>\n\n"
+            f"<code>Deal done successfully with @Username using escrow "
+            f"@CryptoIndiaUnited.</code>\n\n"
+            f"Please use /clean before leaving the group.\n\n"
+            f"<i>Have a Nice Day!😊</i>"
+        )
+
+        await query.edit_message_text(
+            text=finished_msg,
+            parse_mode="HTML"
+        )
+        return
+
     if data.startswith("cancel_"):
         parts = data.split("_")
         deal_id = parts[1]
