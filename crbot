@@ -1,0 +1,53 @@
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+
+BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+
+ESCROW_LINK = "https://t.me/+JsqutFbHNG4xNDk0"
+
+async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    sender = update.effective_user.username
+    chat_id = update.effective_chat.id
+
+    # Check if username argument is provided
+    if not context.args:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Usage: /escrow @username"
+        )
+        return
+
+    mentioned_user = context.args[0]
+
+    # Ensure usernames start with @
+    if not mentioned_user.startswith("@"):
+        mentioned_user = "@" + mentioned_user
+
+    sender_username = f"@{sender}" if sender else "User"
+
+    message = (
+        f"{mentioned_user} & {sender_username} are requested to join "
+        f"*Crypto India Escrow Room 7*.\n\n"
+        f"Please use the following link to join the room 👇\n\n"
+        f"{ESCROW_LINK}\n\n"
+        f"⚠️ *Scammers may invite you at some parallel fake escrow room.*\n"
+        f"Always double check the correct one by using the above link.\n\n"
+        f"Please deposit *USDT / USDC only when the bot prompts you to do so.*\n"
+        f"Do not send anything in advance to avoid issues.\n\n"
+        f"Always verify the deposit address provided by Bot with the ones mentioned @ List of Escrow Addresses."
+    )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=message,
+        parse_mode="Markdown",
+        disable_web_page_preview=True
+    )
+
+def main():
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("escrow", escrow))
+    app.run_polling()
+
+if name == "__main__":
+    main()
