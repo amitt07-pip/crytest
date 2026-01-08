@@ -1788,14 +1788,50 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     room_num, room_data = get_free_room()
 
     if room_num is None:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="❌ All escrow rooms are currently busy. Please try again later."
-        )
-        return
+        missing_room = None
+        for i in range(1, 21):
+            if str(i) not in rooms:
+                missing_room = i
+                break
 
-    invite_link = room_data.get('invite_link')
-    channel_id = room_data.get('channel_id')
+        if missing_room is None:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ All escrow rooms are currently busy. Please try again later."
+            )
+            return
+
+        bot_info = await context.bot.get_me()
+        bot_username = bot_info.username
+
+        invite_link, room_num, channel_id = await create_escrow_group(
+            missing_room,
+            sender_username,
+            mentioned_user,
+            bot_username
+        )
+
+        if invite_link is None:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ Failed to create escrow room. Please try again later."
+            )
+            return
+
+        rooms[str(missing_room)] = {
+            "room_number": missing_room,
+            "channel_id": channel_id,
+            "invite_link": invite_link,
+            "status": "busy",
+            "current_deal_id": None,
+            "sender_user": sender_username,
+            "mentioned_user": mentioned_user
+        }
+        save_rooms()
+        room_num = str(missing_room)
+    else:
+        invite_link = room_data.get('invite_link')
+        channel_id = room_data.get('channel_id')
 
     sender_clean = sender_username.lstrip("@").lower()
     mentioned_clean = mentioned_user.lstrip("@").lower()
