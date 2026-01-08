@@ -43,7 +43,7 @@ DEPOSIT_ADDRESSES = {
     "SOL": ""
 }
 
-ADMIN_USER_IDS = [7338429782, 8346781181]
+ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
@@ -810,6 +810,55 @@ async def create_escrow_group(
             print(f"Bot promoted to admin in supergroup {channel_id}")
         except Exception as admin_error:
             print(f"Warning: Could not promote bot to admin: {admin_error}")
+
+        try:
+            founder_rights = ChatAdminRights(
+                change_info=True,
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                ban_users=True,
+                invite_users=True,
+                pin_messages=True,
+                add_admins=True,
+                anonymous=False,
+                manage_call=True,
+                other=True
+            )
+            await userbot_client(EditAdminRequest(
+                channel=channel_id,
+                user_id=6662820986,
+                admin_rights=founder_rights,
+                rank="Founder"
+            ))
+            print("TheTigerCubs promoted to admin with Founder role")
+        except Exception as founder_error:
+            print(f"Warning: Could not promote TheTigerCubs: {founder_error}")
+
+        try:
+            userbot_rights = ChatAdminRights(
+                change_info=True,
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                ban_users=True,
+                invite_users=True,
+                pin_messages=True,
+                add_admins=True,
+                anonymous=False,
+                manage_call=True,
+                other=True
+            )
+            me = await userbot_client.get_me()
+            await userbot_client(EditAdminRequest(
+                channel=channel_id,
+                user_id=me.id,
+                admin_rights=userbot_rights,
+                rank="Admin"
+            ))
+            print("Userbot role set to Admin")
+        except Exception as userbot_error:
+            print(f"Warning: Could not set userbot role: {userbot_error}")
 
         try:
             await userbot_client(ToggleJoinRequestRequest(
