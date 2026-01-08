@@ -2160,6 +2160,19 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send example form for escrow deal."""
+    example_text = (
+        "USDT Seller: @DemoSeller\n"
+        "USDT Buyer: @DemoBuyer\n"
+        "Amount[USDT]: 100\n"
+        "Amount[INR]: 9100\n"
+        "Payment Method: CDM\n"
+        "Time[Minute]: 30"
+    )
+    await update.message.reply_text(example_text)
+
+
 async def main():
     load_allowed_users()
     load_group_data()
@@ -2170,6 +2183,7 @@ async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("escrow", escrow))
     app.add_handler(CommandHandler("setup_rooms", setup_rooms))
+    app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
