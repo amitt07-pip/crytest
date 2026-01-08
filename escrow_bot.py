@@ -38,6 +38,7 @@ DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
 POLYGON_QR_IMAGES = ["polygon_deposit_qr.jpg", "polygon_qr_2.jpg"]
+SOL_QR_IMAGES = ["sol_deposit_qr.jpg", "sol_qr_2.jpg"]
 
 BSC_DEPOSIT_ADDRESSES = [
     "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
@@ -49,14 +50,20 @@ POLYGON_DEPOSIT_ADDRESSES = [
     "0xf282e789e835ed379aea84ece204d2d643e6774f"
 ]
 
+SOL_DEPOSIT_ADDRESSES = [
+    "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy",
+    "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"
+]
+
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
     "POLYGON": POLYGON_DEPOSIT_ADDRESSES[0],
-    "SOL": ""
+    "SOL": SOL_DEPOSIT_ADDRESSES[0]
 }
 
 bsc_address_index = 0
 polygon_address_index = 0
+sol_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
 
@@ -345,6 +352,15 @@ def get_polygon_deposit_info():
     return address, qr_image
 
 
+def get_sol_deposit_info():
+    """Get rotating Solana deposit address and QR image."""
+    global sol_address_index
+    address = SOL_DEPOSIT_ADDRESSES[sol_address_index]
+    qr_image = SOL_QR_IMAGES[sol_address_index]
+    sol_address_index = (sol_address_index + 1) % len(SOL_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -359,6 +375,10 @@ def build_deposit_message(deal, deal_id):
         deal['qr_image'] = qr_image
     elif network == "POLYGON":
         deposit_address, qr_image = get_polygon_deposit_info()
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
+    elif network == "SOL":
+        deposit_address, qr_image = get_sol_deposit_info()
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
     else:
@@ -1193,9 +1213,9 @@ async def handle_callback(
             deposit_text = build_deposit_message(deal, deal_id)
             network = deal.get('network', 'BSC')
 
-            if network in ['BSC', 'POLYGON']:
+            if network in ['BSC', 'POLYGON', 'SOL']:
                 import os
-                qr_image = deal.get('qr_image', POLYGON_QR_IMAGE)
+                qr_image = deal.get('qr_image')
                 qr_path = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
                     qr_image
