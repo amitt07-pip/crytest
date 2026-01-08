@@ -397,18 +397,51 @@ async def check_polygon_transactions(deposit_address, usdt_contract):
 
 
 async def check_solana_transactions(deposit_address):
-    """Check Solana blockchain for USDT transactions."""
-    api_url = f"{BLOCKCHAIN_APIS['SOL']}/account/transactions"
-    params = {"account": deposit_address, "limit": 10}
+    """Check Solana blockchain for USDT transactions using public RPC."""
+    rpc_url = "https://api.mainnet-beta.solana.com"
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [deposit_address, {"limit": 10}]
+    }
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, params=params) as response:
+            async with session.post(
+                rpc_url,
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data if isinstance(data, list) else []
+                    signatures = data.get("result", [])
+
+                    transactions = []
+                    for sig in signatures:
+                        tx_payload = {
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "getTransaction",
+                            "params": [
+                                sig.get("signature"),
+                                {"encoding": "jsonParsed"}
+                            ]
+                        }
+                        async with session.post(
+                            rpc_url,
+                            json=tx_payload,
+                            headers={"Content-Type": "application/json"}
+                        ) as tx_resp:
+                            if tx_resp.status == 200:
+                                tx_data = await tx_resp.json()
+                                if tx_data.get("result"):
+                                    transactions.append(tx_data["result"])
+
+                    return transactions
     except Exception as e:
-        print(f"Solana API error: {e}")
+        print(f"Solana RPC error: {e}")
 
     return []
 
@@ -435,7 +468,24 @@ def parse_transaction_amount(tx, network):
         amount = int(value) / (10 ** decimals)
         return amount
     elif network == "SOL":
-        return float(tx.get("lamport", 0)) / 1e9
+        try:
+            meta = tx.get("meta", {})
+            pre_balances = meta.get("preBalances", [])
+            post_balances = meta.get("postBalances", [])
+            if pre_balances and post_balances and len(post_balances) > 1:
+                received = post_balances[1] - pre_balances[1]
+                if received > 0:
+                    return received / 1e9
+
+            post_token = meta.get("postTokenBalances", [])
+            for post in post_token:
+                token_amount = post.get("uiTokenAmount", {})
+                amount = float(token_amount.get("uiAmount", 0) or 0)
+                if amount > 0:
+                    return amount
+        except Exception:
+            pass
+        return 0
 
     return 0
 
