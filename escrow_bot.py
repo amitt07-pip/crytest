@@ -4,8 +4,33 @@ import asyncio
 import json
 import aiohttp
 import nest_asyncio
+import logging
+from datetime import datetime
 
 nest_asyncio.apply()
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
+
+
+def log_info(message):
+    """Log info message."""
+    logger.info(message)
+
+
+def log_error(message):
+    """Log error message."""
+    logger.error(message)
+
+
+def log_warning(message):
+    """Log warning message."""
+    logger.warning(message)
 
 from telegram import (  # noqa: E402
     Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup
@@ -541,7 +566,7 @@ async def check_bsc_transactions(deposit_address, usdt_contract):
                     if data.get("status") == "1" and data.get("result"):
                         return data["result"]
     except Exception as e:
-        print(f"BSC API error: {e}")
+        log_error(f"BSC API error: {e}")
 
     return []
 
@@ -566,7 +591,7 @@ async def check_polygon_transactions(deposit_address, usdt_contract):
                     if data.get("status") == "1" and data.get("result"):
                         return data["result"]
     except Exception as e:
-        print(f"Polygon API error: {e}")
+        log_error(f"Polygon API error: {e}")
 
     return []
 
@@ -620,7 +645,7 @@ async def check_solana_transactions(deposit_address):
 
                     return transactions
     except Exception as e:
-        print(f"Solana/Helius API error: {e}")
+        log_error(f"Solana/Helius API error: {e}")
 
     return []
 
@@ -864,7 +889,7 @@ async def init_userbot():
     global userbot_client
     userbot_client = TelegramClient("userbot_session", API_ID, API_HASH)
     await userbot_client.start(phone=PHONE)
-    print("Userbot started successfully!")
+    log_info("Userbot connected")
     return userbot_client
 
 
@@ -883,9 +908,6 @@ async def create_escrow_group(
             users=[bot_username],
             title=group_title
         ))
-
-        print(f"CreateChatRequest result type: {type(result)}")
-        print(f"CreateChatRequest result: {result}")
 
         chat_id = None
         if hasattr(result, 'chats') and result.chats:
@@ -914,23 +936,19 @@ async def create_escrow_group(
                     break
 
         if chat_id is None:
-            print("Could not find chat_id from response")
+            log_error(f"Room {room_number}: Could not find chat_id")
             return None, room_number, None
-
-        print(f"Found chat_id: {chat_id}")
 
         try:
             migrated = await userbot_client(MigrateChatRequest(
                 chat_id=chat_id
             ))
-            print(f"MigrateChatRequest result: {migrated}")
 
             channel_id = None
             if hasattr(migrated, 'chats'):
                 for chat_obj in migrated.chats:
                     if isinstance(chat_obj, Channel):
                         channel_id = chat_obj.id
-                        print(f"Found Channel in migration: {channel_id}")
                         break
 
             if channel_id is None:
@@ -941,16 +959,12 @@ async def create_escrow_group(
                         entity = dialog.entity
                         if isinstance(entity, Channel):
                             channel_id = entity.id
-                            print(f"Found Channel via dialogs: {channel_id}")
                             break
 
             if channel_id is None:
-                print("Migration did not return a Channel, using chat_id")
                 channel_id = chat_id
-            else:
-                print(f"Migrated to supergroup: {channel_id}")
         except Exception as migrate_error:
-            print(f"Migration error: {migrate_error}")
+            log_warning(f"Room {room_number}: Migration error - {migrate_error}")
             channel_id = chat_id
 
         try:
@@ -958,9 +972,8 @@ async def create_escrow_group(
                 peer=channel_id,
                 about="Join @CryptoIndiaUnited"
             ))
-            print("Group description set")
         except Exception as about_error:
-            print(f"Warning: Could not set group description: {about_error}")
+            log_warning(f"Room {room_number}: Could not set description - {about_error}")
 
         try:
             admin_rights = ChatAdminRights(
@@ -982,9 +995,8 @@ async def create_escrow_group(
                 admin_rights=admin_rights,
                 rank="Escrow Bot"
             ))
-            print(f"Bot promoted to admin in supergroup {channel_id}")
         except Exception as admin_error:
-            print(f"Warning: Could not promote bot to admin: {admin_error}")
+            log_warning(f"Room {room_number}: Could not promote bot - {admin_error}")
 
         try:
             founder_rights = ChatAdminRights(
@@ -1010,20 +1022,16 @@ async def create_escrow_group(
                         channel=channel_id,
                         users=[founder_user]
                     ))
-                    print("TheTigerCubs invited to the group")
-                except Exception as invite_err:
-                    print(f"Note: Could not invite TheTigerCubs: {invite_err}")
+                except Exception:
+                    pass
                 await userbot_client(EditAdminRequest(
                     channel=channel_id,
                     user_id=founder_user.id,
                     admin_rights=founder_rights,
                     rank="Founder"
                 ))
-                print("TheTigerCubs promoted to admin with Founder role")
-            else:
-                print("Warning: Could not resolve TheTigerCubs username")
         except Exception as founder_error:
-            print(f"Warning: Could not promote TheTigerCubs: {founder_error}")
+            log_warning(f"Room {room_number}: Could not add Founder - {founder_error}")
 
         try:
             userbot_rights = ChatAdminRights(
@@ -1046,18 +1054,16 @@ async def create_escrow_group(
                 admin_rights=userbot_rights,
                 rank="Admin"
             ))
-            print("Userbot role set to Admin")
         except Exception as userbot_error:
-            print(f"Warning: Could not set userbot role: {userbot_error}")
+            log_warning(f"Room {room_number}: Could not set userbot role - {userbot_error}")
 
         try:
             await userbot_client(ToggleJoinRequestRequest(
                 channel=channel_id,
                 enabled=True
             ))
-            print("Join request approval enabled")
         except Exception as toggle_error:
-            print(f"Warning: Could not enable join requests: {toggle_error}")
+            log_warning(f"Room {room_number}: Could not enable join requests - {toggle_error}")
 
         invite = await userbot_client(ExportChatInviteRequest(
             peer=channel_id,
@@ -1086,7 +1092,7 @@ async def create_escrow_group(
         return invite_link, room_number, channel_id
 
     except Exception as e:
-        print(f"Error creating group: {e}")
+        log_error(f"Room {room_number}: Error creating group - {e}")
         return None, room_number, None
 
 
@@ -1261,7 +1267,7 @@ async def handle_callback(
                     disable_notification=True
                 )
             except Exception as pin_error:
-                print(f"Could not pin message: {pin_error}")
+                log_warning(f"Could not pin message: {pin_error}")
 
             deposit_text = build_deposit_message(deal, deal_id)
             network = deal.get('network', 'BSC')
@@ -1966,13 +1972,11 @@ async def handle_join_request(
     user = join_request.from_user
     username = user.username.lower() if user.username else None
 
-    print(f"Join request from {username} for chat {chat_id}")
-
     if chat_id in allowed_users:
         allowed = allowed_users[chat_id]
         if username and username in allowed:
             await join_request.approve()
-            print(f"Approved join request from {username}")
+            log_info(f"Join approved: @{username}")
 
             if chat_id in group_data:
                 if username not in group_data[chat_id]["joined_users"]:
@@ -1988,10 +1992,8 @@ async def handle_join_request(
                         )
         else:
             await join_request.decline()
-            print(f"Declined join request from {username}")
     else:
         await join_request.decline()
-        print(f"Declined join request - chat {chat_id} not in allowed list")
 
 
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2145,12 +2147,12 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 }
                 save_rooms()
                 created_count += 1
-                print(f"Created room {room_number}")
+                log_info(f"Room {room_number} created")
 
             await asyncio.sleep(2)
 
         except Exception as e:
-            print(f"Error creating room {room_number}: {e}")
+            log_error(f"Room {room_number}: Setup failed - {e}")
             continue
 
     await context.bot.send_message(
@@ -2193,7 +2195,7 @@ async def main():
         filters.PHOTO, handle_photo
     ))
 
-    print("Bot is running...")
+    log_info("Bot started successfully")
     await app.run_polling()
 
 
