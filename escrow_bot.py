@@ -33,6 +33,15 @@ ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
 ALLOWED_USERS_FILE = "allowed_users.json"
 GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
+BSC_QR_IMAGE = "bsc_deposit_qr.jpg"
+
+DEPOSIT_ADDRESSES = {
+    "bsc": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "polygon": "",
+    "sol": ""
+}
+
+ADMIN_USER_IDS = []
 
 userbot_client = None
 allowed_users = {}
@@ -191,7 +200,72 @@ def get_confirm_buttons(deal_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-def build_deal_summary(deal, deal_id):
+def get_deposit_buttons(deal_id):
+    """Create buttons for deposit message."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "I HAVE PAID", callback_data=f"ihavepaid_{deal_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "CONFIRM[ADMIN]", callback_data=f"adminconfirm_{deal_id}"
+            ),
+            InlineKeyboardButton(
+                "CANCEL", callback_data=f"depositcancel_{deal_id}"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def get_payment_check_buttons(deal_id):
+    """Create buttons for payment checking message."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "Confirm[Admin]", callback_data=f"adminconfirm_{deal_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Cancel", callback_data=f"admincancel_{deal_id}"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_deposit_message(deal, deal_id):
+    """Build the deposit message for seller."""
+    currency = deal['currency']
+    network = deal.get('network', 'bsc')
+    network_name = get_network_display_name(network)
+    amount = deal.get('amount_crypto', '0')
+    seller = deal['seller']
+
+    deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+
+    msg = (
+        f"Deal [{deal_id}]\n"
+        f"NOTE: {seller} [Seller] <b>DEPOSIT EXACT</b> "
+        f"<b><u>{amount}</u></b> <b>{currency}</b>. "
+        f"DO NOT INCLUDE NETWORK FEE, make sure the amount received is "
+        f"exact!\n"
+        f"<b>Example</b>: If your withdrawal fee is 0.2 {currency} then send "
+        f"<b><u>{float(amount) + 0.2:.1f}</u></b>{currency} so the received "
+        f"amount is <b><u>{amount}</u></b> {currency}\n\n"
+        f"Deposit Address: <code>{deposit_address}</code>\n"
+        f"Chain: <code>{network_name}</code>\n\n"
+        f"Please click 'I Have Paid' <b>ONLY</b> when you have made the "
+        f"Payment."
+    )
+
+    return msg
+
+
+def build_deal_summary(deal, deal_id, both_confirmed=False):
     """Build the deal summary message."""
     currency = deal['currency']
     network_name = get_network_display_name(deal.get('network', ''))
@@ -238,17 +312,18 @@ def build_deal_summary(deal, deal_id):
         msg += "[See attached image]\n\n"
 
     if confirm_status:
-        msg += f"{confirm_status}\n\n"
+        msg += f"{confirm_status}"
 
-    msg += (
-        f"🚫 <b>IMPORTANT:</b> {deal['seller']}, do <u>NOT</u> deposit any "
-        f"{currency}s to the addresses above.\n"
-        f"You will receive a separate <b>Escrow Deposit</b> Address after "
-        f"confirming the deal details.\n\n"
-        f"🔹 <b>Note to Buyer</b> ({deal['buyer']}): You can only withdraw "
-        f"{currency} on the <b>{network_name}</b> network as selected by "
-        f"the seller."
-    )
+    if not both_confirmed:
+        msg += (
+            f"\n\n🚫 <b>IMPORTANT:</b> {deal['seller']}, do <u>NOT</u> deposit "
+            f"any {currency}s to the addresses above.\n"
+            f"You will receive a separate <b>Escrow Deposit</b> Address after "
+            f"confirming the deal details.\n\n"
+            f"🔹 <b>Note to Buyer</b> ({deal['buyer']}): You can only withdraw "
+            f"{currency} on the <b>{network_name}</b> network as selected by "
+            f"the seller."
+        )
 
     return msg
 
@@ -558,22 +633,76 @@ async def handle_callback(
 
         save_deals()
 
-        summary_text = build_deal_summary(deal, deal_id)
+        both_confirmed = (
+            deal.get('seller_confirmed') and deal.get('buyer_confirmed')
+        )
+        summary_text = build_deal_summary(deal, deal_id, both_confirmed)
 
-        if deal.get('seller_confirmed') and deal.get('buyer_confirmed'):
-            await query.edit_message_text(
-                text=summary_text,
-                parse_mode="HTML"
-            )
+        if both_confirmed:
+            payment_type = deal.get('payment_details_type', 'text')
+            if payment_type == 'photo':
+                photo_id = deal.get('payment_details')
+                await query.message.delete()
+                sent = await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=photo_id,
+                    caption=summary_text,
+                    parse_mode="HTML"
+                )
+                deal['summary_msg_id'] = sent.message_id
+            else:
+                await query.edit_message_text(
+                    text=summary_text,
+                    parse_mode="HTML"
+                )
 
             try:
+                msg_id = query.message.message_id
+                msg_to_pin = deal.get('summary_msg_id', msg_id)
                 await context.bot.pin_chat_message(
                     chat_id=query.message.chat_id,
-                    message_id=query.message.message_id,
+                    message_id=msg_to_pin,
                     disable_notification=True
                 )
             except Exception as pin_error:
                 print(f"Could not pin message: {pin_error}")
+
+            deposit_text = build_deposit_message(deal, deal_id)
+            network = deal.get('network', 'bsc')
+
+            if network == 'bsc':
+                import os
+                qr_path = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    BSC_QR_IMAGE
+                )
+                try:
+                    with open(qr_path, 'rb') as qr_file:
+                        sent_deposit = await context.bot.send_photo(
+                            chat_id=query.message.chat_id,
+                            photo=qr_file,
+                            caption=deposit_text,
+                            parse_mode="HTML",
+                            reply_markup=get_deposit_buttons(deal_id)
+                        )
+                except FileNotFoundError:
+                    sent_deposit = await context.bot.send_message(
+                        chat_id=query.message.chat_id,
+                        text=deposit_text,
+                        parse_mode="HTML",
+                        reply_markup=get_deposit_buttons(deal_id)
+                    )
+            else:
+                sent_deposit = await context.bot.send_message(
+                    chat_id=query.message.chat_id,
+                    text=deposit_text,
+                    parse_mode="HTML",
+                    reply_markup=get_deposit_buttons(deal_id)
+                )
+
+            deal['deposit_msg_id'] = sent_deposit.message_id
+            deal['status'] = 'pending_deposit'
+            save_deals()
         else:
             payment_type = deal.get('payment_details_type', 'text')
             if payment_type == 'photo':
@@ -594,6 +723,120 @@ async def handle_callback(
                     parse_mode="HTML",
                     reply_markup=get_confirm_buttons(deal_id)
                 )
+        return
+
+    if data.startswith("ihavepaid_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+
+        if username != seller_clean:
+            await query.answer("Only the seller can click this button!")
+            return
+
+        payment_type = deal.get('payment_details_type', 'text')
+        if payment_type == 'photo':
+            photo_id = deal.get('payment_details')
+            deposit_text = build_deposit_message(deal, deal_id)
+            await query.message.delete()
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=photo_id,
+                caption=deposit_text,
+                parse_mode="HTML"
+            )
+        else:
+            deposit_text = build_deposit_message(deal, deal_id)
+            await query.edit_message_text(
+                text=deposit_text,
+                parse_mode="HTML"
+            )
+
+        payment_check_msg = (
+            f"<b><u>Deal</u></b> [{deal_id}]\n\n"
+            f"Payment will Be checked on Blockchain for next 5 mins. "
+            f"You will be notified once payment is confirmed. Thanks!"
+        )
+
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=payment_check_msg,
+            parse_mode="HTML",
+            reply_markup=get_payment_check_buttons(deal_id)
+        )
+
+        deal['status'] = 'payment_checking'
+        save_deals()
+        return
+
+    if data.startswith("adminconfirm_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        user_id = query.from_user.id
+        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only admins can confirm!")
+            return
+
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        deal['admin_confirmed'] = True
+        deal['status'] = 'completed'
+        save_deals()
+
+        await query.edit_message_text(
+            text="Payment confirmed by admin. Deal completed!",
+            parse_mode="HTML"
+        )
+        return
+
+    if data.startswith("admincancel_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        user_id = query.from_user.id
+        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only admins can cancel!")
+            return
+
+        if deal_id not in deals:
+            return
+
+        del deals[deal_id]
+        save_deals()
+
+        await query.edit_message_text(
+            text="Deal cancelled by admin.",
+            parse_mode="HTML"
+        )
+        return
+
+    if data.startswith("depositcancel_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        user_id = query.from_user.id
+        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only admins can cancel!")
+            return
+
+        if deal_id not in deals:
+            return
+
+        del deals[deal_id]
+        save_deals()
+
+        await query.edit_message_text(
+            text="Deal cancelled by admin.",
+            parse_mode="HTML"
+        )
         return
 
     if data.startswith("cancel_"):
