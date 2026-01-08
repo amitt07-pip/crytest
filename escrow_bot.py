@@ -1387,16 +1387,6 @@ async def handle_callback(
         )
         return
 
-    if data.startswith("release_"):
-        parts = data.split("_")
-        deal_id = parts[1]
-
-        if deal_id not in deals:
-            return
-
-        await query.answer("Release Payment - Coming soon!")
-        return
-
     if data.startswith("partial_"):
         parts = data.split("_")
         deal_id = parts[1]
