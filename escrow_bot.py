@@ -20,8 +20,9 @@ from telethon.tl.functions.messages import (  # noqa: E402
     EditChatAboutRequest
 )
 from telethon.tl.functions.channels import (  # noqa: E402
-    ToggleJoinRequestRequest, EditAdminRequest
+    ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest
 )
+from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
 from telethon.tl.types import ChatAdminRights, Channel  # noqa: E402
 
 
@@ -883,14 +884,28 @@ async def create_escrow_group(
                 manage_call=True,
                 other=True
             )
-            founder_user = await userbot_client.get_entity("@TheTigerCubs")
-            await userbot_client(EditAdminRequest(
-                channel=channel_id,
-                user_id=founder_user.id,
-                admin_rights=founder_rights,
-                rank="Founder"
-            ))
-            print("TheTigerCubs promoted to admin with Founder role")
+            resolved = await userbot_client(
+                ResolveUsernameRequest(username='TheTigerCubs')
+            )
+            if resolved.users:
+                founder_user = resolved.users[0]
+                try:
+                    await userbot_client(InviteToChannelRequest(
+                        channel=channel_id,
+                        users=[founder_user]
+                    ))
+                    print("TheTigerCubs invited to the group")
+                except Exception as invite_err:
+                    print(f"Note: Could not invite TheTigerCubs: {invite_err}")
+                await userbot_client(EditAdminRequest(
+                    channel=channel_id,
+                    user_id=founder_user.id,
+                    admin_rights=founder_rights,
+                    rank="Founder"
+                ))
+                print("TheTigerCubs promoted to admin with Founder role")
+            else:
+                print("Warning: Could not resolve TheTigerCubs username")
         except Exception as founder_error:
             print(f"Warning: Could not promote TheTigerCubs: {founder_error}")
 
