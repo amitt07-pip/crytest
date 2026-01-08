@@ -64,12 +64,16 @@ USDC_BSC_DEPOSIT_ADDRESSES = [
 USDC_POLYGON_DEPOSIT_ADDRESS = "0xAe6313dE2fDD754734074D8a6F4835c10827115b"
 USDC_POLYGON_QR_IMAGE = "usdc_polygon_qr.jpg"
 
+USDC_SOL_DEPOSIT_ADDRESS = "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy"
+USDC_SOL_QR_IMAGE = "usdc_sol_qr.jpg"
+
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
     "POLYGON": POLYGON_DEPOSIT_ADDRESSES[0],
     "SOL": SOL_DEPOSIT_ADDRESSES[0],
     "USDC_BSC": USDC_BSC_DEPOSIT_ADDRESSES[0],
-    "USDC_POLYGON": USDC_POLYGON_DEPOSIT_ADDRESS
+    "USDC_POLYGON": USDC_POLYGON_DEPOSIT_ADDRESS,
+    "USDC_SOL": USDC_SOL_DEPOSIT_ADDRESS
 }
 
 bsc_address_index = 0
@@ -243,7 +247,8 @@ def get_network_display_name(network):
         'POLYGON': 'POLYGON',
         'SOL': 'SOLANA',
         'USDC_BSC': 'BEP20',
-        'USDC_POLYGON': 'POLYGON'
+        'USDC_POLYGON': 'POLYGON',
+        'USDC_SOL': 'SOLANA'
     }
     return mapping.get(network, network)
 
@@ -270,6 +275,9 @@ def get_network_buttons(deal_id):
         [
             InlineKeyboardButton(
                 "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON"
+            ),
+            InlineKeyboardButton(
+                "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL"
             )
         ],
         [
@@ -419,6 +427,11 @@ def build_deposit_message(deal, deal_id):
     elif network == "USDC_POLYGON":
         deposit_address = USDC_POLYGON_DEPOSIT_ADDRESS
         qr_image = USDC_POLYGON_QR_IMAGE
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
+    elif network == "USDC_SOL":
+        deposit_address = USDC_SOL_DEPOSIT_ADDRESS
+        qr_image = USDC_SOL_QR_IMAGE
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
     else:
@@ -1253,7 +1266,7 @@ async def handle_callback(
             deposit_text = build_deposit_message(deal, deal_id)
             network = deal.get('network', 'BSC')
 
-            if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON']:
+            if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON', 'USDC_SOL']:
                 import os
                 qr_image = deal.get('qr_image')
                 qr_path = os.path.join(
