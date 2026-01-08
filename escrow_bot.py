@@ -35,10 +35,11 @@ ALLOWED_USERS_FILE = "allowed_users.json"
 GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 BSC_QR_IMAGE = "bsc_deposit_qr.jpg"
+POLYGON_QR_IMAGE = "polygon_deposit_qr.jpg"
 
 DEPOSIT_ADDRESSES = {
     "BSC": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
-    "POLYGON": "",
+    "POLYGON": "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
     "SOL": ""
 }
 
@@ -1026,11 +1027,12 @@ async def handle_callback(
             deposit_text = build_deposit_message(deal, deal_id)
             network = deal.get('network', 'BSC')
 
-            if network == 'BSC':
+            if network in ['BSC', 'POLYGON']:
                 import os
+                qr_image = BSC_QR_IMAGE if network == 'BSC' else POLYGON_QR_IMAGE
                 qr_path = os.path.join(
                     os.path.dirname(os.path.abspath(__file__)),
-                    BSC_QR_IMAGE
+                    qr_image
                 )
                 try:
                     with open(qr_path, 'rb') as qr_file:
