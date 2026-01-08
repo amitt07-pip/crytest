@@ -2,6 +2,7 @@ import os
 import random
 import asyncio
 import json
+import aiohttp
 import nest_asyncio
 
 nest_asyncio.apply()
@@ -42,6 +43,23 @@ DEPOSIT_ADDRESSES = {
 }
 
 ADMIN_USER_IDS = []
+
+BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
+POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
+
+USDT_CONTRACTS = {
+    "BSC": "0x55d398326f99059fF775485246999027B3197955",
+    "POLYGON": "0xc2132D05D31c914a87C6611C10748AEb04B58e8F",
+    "SOL": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
+}
+
+BLOCKCHAIN_APIS = {
+    "BSC": "https://api.bscscan.com/api",
+    "POLYGON": "https://api.polygonscan.com/api",
+    "SOL": "https://api.solscan.io"
+}
+
+active_monitors = {}
 
 userbot_client = None
 allowed_users = {}
@@ -326,6 +344,289 @@ def build_deal_summary(deal, deal_id, both_confirmed=False):
         )
 
     return msg
+
+
+async def check_bsc_transactions(deposit_address, usdt_contract):
+    """Check BSC blockchain for USDT transactions to deposit address."""
+    api_url = BLOCKCHAIN_APIS["BSC"]
+    params = {
+        "module": "account",
+        "action": "tokentx",
+        "contractaddress": usdt_contract,
+        "address": deposit_address,
+        "sort": "desc",
+        "apikey": BSCSCAN_API_KEY
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "1" and data.get("result"):
+                        return data["result"]
+    except Exception as e:
+        print(f"BSC API error: {e}")
+
+    return []
+
+
+async def check_polygon_transactions(deposit_address, usdt_contract):
+    """Check Polygon blockchain for USDT transactions."""
+    api_url = BLOCKCHAIN_APIS["POLYGON"]
+    params = {
+        "module": "account",
+        "action": "tokentx",
+        "contractaddress": usdt_contract,
+        "address": deposit_address,
+        "sort": "desc",
+        "apikey": POLYGONSCAN_API_KEY
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("status") == "1" and data.get("result"):
+                        return data["result"]
+    except Exception as e:
+        print(f"Polygon API error: {e}")
+
+    return []
+
+
+async def check_solana_transactions(deposit_address):
+    """Check Solana blockchain for USDT transactions."""
+    api_url = f"{BLOCKCHAIN_APIS['SOL']}/account/transactions"
+    params = {"account": deposit_address, "limit": 10}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(api_url, params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data if isinstance(data, list) else []
+    except Exception as e:
+        print(f"Solana API error: {e}")
+
+    return []
+
+
+async def get_transactions_for_network(network, deposit_address):
+    """Get transactions based on network type."""
+    usdt_contract = USDT_CONTRACTS.get(network, "")
+
+    if network == "BSC":
+        return await check_bsc_transactions(deposit_address, usdt_contract)
+    elif network == "POLYGON":
+        return await check_polygon_transactions(deposit_address, usdt_contract)
+    elif network == "SOL":
+        return await check_solana_transactions(deposit_address)
+
+    return []
+
+
+def parse_transaction_amount(tx, network):
+    """Parse transaction amount from API response."""
+    if network in ["BSC", "POLYGON"]:
+        value = tx.get("value", "0")
+        decimals = int(tx.get("tokenDecimal", "18"))
+        amount = int(value) / (10 ** decimals)
+        return amount
+    elif network == "SOL":
+        return float(tx.get("lamport", 0)) / 1e9
+
+    return 0
+
+
+def get_deal_buttons(deal_id):
+    """Create buttons for deal completion message."""
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "Release Payment", callback_data=f"release_{deal_id}"
+            ),
+            InlineKeyboardButton(
+                "Partial Release", callback_data=f"partial_{deal_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "Dispute", callback_data=f"dispute_{deal_id}"
+            ),
+            InlineKeyboardButton(
+                "CANCEL", callback_data=f"dealcancel_{deal_id}"
+            )
+        ]
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_payment_detected_message(deal_id, amount, total, deal_amount, curr):
+    """Build payment detected message."""
+    confirmations = "48/30"
+
+    msg = (
+        f"<b><i>Deal</i></b> #{deal_id}\n\n"
+        f"<b>Payment Detected Successfully</b>\n\n"
+        f"Amount: <b>{amount:.2f} {curr}</b>\n"
+        f"Total Amount Received: <b>{total:.2f} {curr}</b>\n"
+        f"Current Confirmations: {confirmations}\n"
+    )
+
+    if total > float(deal_amount):
+        excess = total - float(deal_amount)
+        msg += (
+            f"\n⚠️ <b>Overpayment Detected!</b>\n"
+            f"Excess Amount: <b>{excess:.2f} {curr}</b>\n"
+        )
+
+    msg += (
+        "\nNOTE: Please be advised that if you send INR before the payment "
+        "is confirmed, you are solely responsible for your loss!"
+    )
+
+    return msg
+
+
+def build_usdt_received_message(deal, deal_id, received_amount):
+    """Build USDT received message."""
+    currency = deal['currency']
+    deal_amount = float(deal.get('amount_crypto', '0'))
+    escrow_fee = calculate_escrow_fee(str(deal_amount))
+    to_release = received_amount - escrow_fee
+    inr_amount = deal.get('amount_inr', '0')
+    buyer = deal['buyer']
+    seller = deal['seller']
+
+    msg = (
+        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+        f"<b>USDT RECEIVED | SEND INR.</b>\n"
+        f"Amount Received: <b><u>{received_amount:.2f} {currency}</u></b>\n"
+        f"Deal Amount: <b><u>{deal_amount:.2f} {currency}</u></b>\n"
+        f"To Be Released: <b><u>{to_release:.2f} {currency}</u></b>\n"
+        f"Amount to be Sent: <b><u>{inr_amount} INR</u></b>\n"
+        f"Escrow Fee: <b><u>{escrow_fee:.2f} {currency}</u></b>\n\n"
+        f"{buyer} & {seller} proceed with your deal.\n\n"
+        f"{seller} release payment <b><u>ONLY</u></b> after Deal Completion.\n"
+        f"Please note that this process is irreversible."
+    )
+
+    return msg
+
+
+def build_payment_details_message(deal, deal_id):
+    """Build payment details message for buyer."""
+    payment_details = deal.get('payment_details', '')
+    payment_type = deal.get('payment_details_type', 'text')
+    buyer = deal['buyer']
+
+    msg = (
+        f"<b>Deal</b> #{deal_id}\n\n"
+        f"<b>Payment Details:</b>\n"
+    )
+
+    if payment_type == 'text':
+        msg += f"{payment_details}\n\n"
+    else:
+        msg += "[See image above]\n\n"
+
+    msg += (
+        f"{buyer} pay INR to the above details to complete the deal.\n\n"
+        f"⚠️ Only use payment details provided in this Escrow Group for the "
+        f"transaction! Do <b>NOT</b> trust any payment requests or details "
+        f"sent by the seller via DM."
+    )
+
+    return msg
+
+
+async def monitor_blockchain(deal_id, chat_id, bot):
+    """Monitor blockchain for incoming transactions."""
+    global deals, active_monitors
+
+    if deal_id not in deals:
+        return
+
+    deal = deals[deal_id]
+    network = deal.get('network', 'BSC')
+    deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+    deal_amount = deal.get('amount_crypto', '0')
+    currency = deal['currency']
+    start_time = asyncio.get_event_loop().time()
+    check_interval = 30
+    max_duration = 300
+
+    while deal_id in active_monitors:
+        elapsed = asyncio.get_event_loop().time() - start_time
+        if elapsed > max_duration:
+            break
+
+        transactions = await get_transactions_for_network(
+            network, deposit_address
+        )
+
+        total_received = 0
+        latest_amount = 0
+
+        for tx in transactions:
+            if tx.get("to", "").lower() == deposit_address.lower():
+                amount = parse_transaction_amount(tx, network)
+                total_received += amount
+                if amount > latest_amount:
+                    latest_amount = amount
+
+        if total_received > 0:
+            deal['received_amount'] = total_received
+            deal['status'] = 'payment_received'
+            save_deals()
+
+            detected_msg = build_payment_detected_message(
+                deal_id, latest_amount, total_received, deal_amount, currency
+            )
+            await bot.send_message(
+                chat_id=chat_id,
+                text=detected_msg,
+                parse_mode="HTML"
+            )
+
+            received_msg = build_usdt_received_message(
+                deal, deal_id, total_received
+            )
+            await bot.send_message(
+                chat_id=chat_id,
+                text=received_msg,
+                parse_mode="HTML",
+                reply_markup=get_deal_buttons(deal_id)
+            )
+
+            payment_type = deal.get('payment_details_type', 'text')
+            if payment_type == 'photo':
+                photo_id = deal.get('payment_details')
+                details_msg = build_payment_details_message(deal, deal_id)
+                await bot.send_photo(
+                    chat_id=chat_id,
+                    photo=photo_id,
+                    caption=details_msg,
+                    parse_mode="HTML"
+                )
+            else:
+                details_msg = build_payment_details_message(deal, deal_id)
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=details_msg,
+                    parse_mode="HTML"
+                )
+
+            if deal_id in active_monitors:
+                del active_monitors[deal_id]
+            break
+
+        await asyncio.sleep(check_interval)
+
+    if deal_id in active_monitors:
+        del active_monitors[deal_id]
 
 
 async def init_userbot():
@@ -772,6 +1073,71 @@ async def handle_callback(
 
         deal['status'] = 'payment_checking'
         save_deals()
+
+        active_monitors[deal_id] = True
+        asyncio.create_task(
+            monitor_blockchain(deal_id, query.message.chat_id, context.bot)
+        )
+        return
+
+    if data.startswith("release_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            return
+
+        await query.answer("Release Payment - Coming soon!")
+        return
+
+    if data.startswith("partial_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            return
+
+        await query.answer("Partial Release - Coming soon!")
+        return
+
+    if data.startswith("dispute_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            return
+
+        await query.answer("Dispute - Coming soon!")
+        return
+
+    if data.startswith("dealcancel_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+
+        if deal_id not in deals:
+            await query.edit_message_text(
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
+            return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+
+        if username != seller_clean:
+            await query.answer("Only the seller can cancel the deal!")
+            return
+
+        if deal_id in active_monitors:
+            del active_monitors[deal_id]
+
+        del deals[deal_id]
+        save_deals()
+
+        await query.edit_message_text(
+            text="Deal has been cancelled.",
+            parse_mode="HTML"
+        )
         return
 
     if data.startswith("adminconfirm_"):
