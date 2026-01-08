@@ -12,7 +12,7 @@ from telethon.tl.functions.messages import (
     CreateChatRequest, ExportChatInviteRequest, MigrateChatRequest
 )
 from telethon.tl.functions.channels import (
-    ToggleJoinRequestRequest, EditAdminRequest
+    ToggleJoinRequestRequest, EditAdminRequest, EditAboutRequest
 )
 from telethon.tl.types import ChatAdminRights
 
@@ -24,9 +24,11 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
 ALLOWED_USERS_FILE = "allowed_users.json"
+GROUP_DATA_FILE = "group_data.json"
 
 userbot_client = None
 allowed_users = {}
+group_data = {}
 
 
 def load_allowed_users():
@@ -43,6 +45,20 @@ def save_allowed_users():
         json.dump(allowed_users, f)
 
 
+def load_group_data():
+    global group_data
+    try:
+        with open(GROUP_DATA_FILE, "r") as f:
+            group_data = json.load(f)
+    except FileNotFoundError:
+        group_data = {}
+
+
+def save_group_data():
+    with open(GROUP_DATA_FILE, "w") as f:
+        json.dump(group_data, f)
+
+
 async def init_userbot():
     global userbot_client
     userbot_client = TelegramClient("userbot_session", API_ID, API_HASH)
@@ -54,7 +70,7 @@ async def init_userbot():
 async def create_escrow_group(
     room_number, sender_username, mentioned_username, bot_username
 ):
-    global userbot_client, allowed_users
+    global userbot_client, allowed_users, group_data
 
     if userbot_client is None:
         await init_userbot()
@@ -80,6 +96,15 @@ async def create_escrow_group(
         except Exception as migrate_error:
             print(f"Migration error: {migrate_error}")
             channel_id = chat_id
+
+        try:
+            await userbot_client(EditAboutRequest(
+                channel=channel_id,
+                about="Join @CryptoIndiaUnited"
+            ))
+            print("Group description set")
+        except Exception as about_error:
+            print(f"Warning: Could not set group description: {about_error}")
 
         try:
             admin_rights = ChatAdminRights(
@@ -128,6 +153,14 @@ async def create_escrow_group(
         allowed_users[str(channel_id)] = [sender_clean, mentioned_clean]
         save_allowed_users()
 
+        group_data[str(channel_id)] = {
+            "allowed_users": [sender_clean, mentioned_clean],
+            "joined_users": [],
+            "mentioned_user": mentioned_username,
+            "sender_user": sender_username
+        }
+        save_group_data()
+
         return invite_link, room_number, channel_id
 
     except Exception as e:
@@ -135,9 +168,48 @@ async def create_escrow_group(
         return None, room_number, None
 
 
+async def send_welcome_messages(context, chat_id, mentioned_user, sender_user):
+    msg1 = (
+        f"Hii {mentioned_user}, Welcome to the Escrow Group!\n\n"
+        f"Please use /clean to free the group after the deal is completed."
+    )
+    await context.bot.send_message(chat_id=int(chat_id), text=msg1)
+
+    msg2 = (
+        f"{mentioned_user} {sender_user}\n"
+        f"One of you need to fill the form given below to start the deal!\n\n"
+        f"Use /exampleform to check out a filled example to guide you.\n\n"
+        f"<b><u>Note</u></b>:- While specifying Amount[USDT/USDC] "
+        f"<b>include</b> Escrow Fees in it. "
+        f"Escrow fees will be deducted before releasing the amount "
+        f"to the buyer."
+    )
+    await context.bot.send_message(
+        chat_id=int(chat_id),
+        text=msg2,
+        parse_mode="HTML"
+    )
+
+    msg3 = (
+        "<code>USDT Seller:\n"
+        "USDT Buyer:\n"
+        "Amount[USDT]:\n"
+        "Amount[INR]:\n"
+        "Payment Method:\n"
+        "Time[Minute]:</code>"
+    )
+    await context.bot.send_message(
+        chat_id=int(chat_id),
+        text=msg3,
+        parse_mode="HTML"
+    )
+
+
 async def handle_join_request(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
+    global group_data
+
     join_request: ChatJoinRequest = update.chat_join_request
     chat_id = str(join_request.chat.id)
     user = join_request.from_user
@@ -150,6 +222,19 @@ async def handle_join_request(
         if username and username in allowed:
             await join_request.approve()
             print(f"Approved join request from {username}")
+
+            if chat_id in group_data:
+                if username not in group_data[chat_id]["joined_users"]:
+                    group_data[chat_id]["joined_users"].append(username)
+                    save_group_data()
+
+                    if len(group_data[chat_id]["joined_users"]) == 2:
+                        mentioned = group_data[chat_id]["mentioned_user"]
+                        sender = group_data[chat_id]["sender_user"]
+                        await asyncio.sleep(2)
+                        await send_welcome_messages(
+                            context, chat_id, mentioned, sender
+                        )
         else:
             await join_request.decline()
             print(f"Declined join request from {username}")
@@ -219,6 +304,7 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def main():
     load_allowed_users()
+    load_group_data()
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
