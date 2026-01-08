@@ -34,6 +34,7 @@ ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
 ALLOWED_USERS_FILE = "allowed_users.json"
 GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
+ROOMS_FILE = "rooms.json"
 BSC_QR_IMAGE = "bsc_deposit_qr.jpg"
 POLYGON_QR_IMAGE = "polygon_deposit_qr.jpg"
 
@@ -67,6 +68,7 @@ userbot_client = None
 allowed_users = {}
 group_data = {}
 deals = {}
+rooms = {}
 
 
 def load_allowed_users():
@@ -109,6 +111,60 @@ def load_deals():
 def save_deals():
     with open(DEALS_FILE, "w") as f:
         json.dump(deals, f)
+
+
+def load_rooms():
+    global rooms
+    try:
+        with open(ROOMS_FILE, "r") as f:
+            rooms = json.load(f)
+    except FileNotFoundError:
+        rooms = {}
+
+
+def save_rooms():
+    with open(ROOMS_FILE, "w") as f:
+        json.dump(rooms, f)
+
+
+def get_free_room():
+    """Get a free room from the pool."""
+    for room_num, room_data in rooms.items():
+        if room_data.get('status') == 'free':
+            return room_num, room_data
+    return None, None
+
+
+def mark_room_busy(room_num, deal_id, sender_username, mentioned_username):
+    """Mark a room as busy with a deal."""
+    if room_num in rooms:
+        rooms[room_num]['status'] = 'busy'
+        rooms[room_num]['current_deal_id'] = deal_id
+        rooms[room_num]['sender_user'] = sender_username
+        rooms[room_num]['mentioned_user'] = mentioned_username
+        save_rooms()
+
+
+def mark_room_free(room_num):
+    """Mark a room as free after deal completion."""
+    if room_num in rooms:
+        rooms[room_num]['status'] = 'free'
+        rooms[room_num]['current_deal_id'] = None
+        rooms[room_num]['sender_user'] = None
+        rooms[room_num]['mentioned_user'] = None
+        save_rooms()
+
+
+def get_room_by_channel_id(channel_id):
+    """Find room number by channel ID."""
+    channel_str = str(channel_id)
+    for room_num, room_data in rooms.items():
+        if str(room_data.get('channel_id')) == channel_str:
+            return room_num
+        full_id = f"-100{room_data.get('channel_id')}"
+        if full_id == channel_str:
+            return room_num
+    return None
 
 
 def generate_deal_id():
@@ -1233,6 +1289,10 @@ async def handle_callback(
         if deal_id in active_monitors:
             del active_monitors[deal_id]
 
+        room_num = get_room_by_channel_id(query.message.chat_id)
+        if room_num:
+            mark_room_free(room_num)
+
         del deals[deal_id]
         save_deals()
 
@@ -1317,6 +1377,10 @@ async def handle_callback(
         if deal_id not in deals:
             return
 
+        room_num = get_room_by_channel_id(query.message.chat_id)
+        if room_num:
+            mark_room_free(room_num)
+
         del deals[deal_id]
         save_deals()
 
@@ -1337,6 +1401,10 @@ async def handle_callback(
 
         if deal_id not in deals:
             return
+
+        room_num = get_room_by_channel_id(query.message.chat_id)
+        if room_num:
+            mark_room_free(room_num)
 
         del deals[deal_id]
         save_deals()
@@ -1364,6 +1432,10 @@ async def handle_callback(
         if username != seller_clean:
             await query.answer("Only the seller can cancel the deal!")
             return
+
+        room_num = get_room_by_channel_id(query.message.chat_id)
+        if room_num:
+            mark_room_free(room_num)
 
         del deals[deal_id]
         save_deals()
@@ -1713,24 +1785,35 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sender_username = f"@{sender}" if sender else "User"
 
-    room_number = random.randint(1, 20)
+    room_num, room_data = get_free_room()
 
-    bot_info = await context.bot.get_me()
-    bot_username = bot_info.username
-
-    invite_link, room_num, channel_id = await create_escrow_group(
-        room_number,
-        sender_username,
-        mentioned_user,
-        bot_username
-    )
-
-    if invite_link is None:
+    if room_num is None:
         await context.bot.send_message(
             chat_id=chat_id,
-            text="❌ Failed to create escrow room. Please try again later."
+            text="❌ All escrow rooms are currently busy. Please try again later."
         )
         return
+
+    invite_link = room_data.get('invite_link')
+    channel_id = room_data.get('channel_id')
+
+    sender_clean = sender_username.lstrip("@").lower()
+    mentioned_clean = mentioned_user.lstrip("@").lower()
+
+    full_channel_id = f"-100{channel_id}"
+    allowed_users[full_channel_id] = [sender_clean, mentioned_clean]
+    save_allowed_users()
+
+    group_data[full_channel_id] = {
+        "allowed_users": [sender_clean, mentioned_clean],
+        "joined_users": [],
+        "mentioned_user": mentioned_user,
+        "sender_user": sender_username,
+        "room_number": room_num
+    }
+    save_group_data()
+
+    mark_room_busy(room_num, None, sender_username, mentioned_user)
 
     message = (
         f"{mentioned_user} & {sender_username} are requested to join "
@@ -1754,14 +1837,76 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to create all 20 escrow rooms."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Only admins can use this command."
+        )
+        return
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text="🔄 Creating 20 escrow rooms... This may take a few minutes."
+    )
+
+    bot_info = await context.bot.get_me()
+    bot_username = bot_info.username
+
+    created_count = 0
+    for room_number in range(1, 21):
+        if str(room_number) in rooms:
+            continue
+
+        try:
+            invite_link, room_num, channel_id = await create_escrow_group(
+                room_number,
+                "@setup",
+                "@setup",
+                bot_username
+            )
+
+            if invite_link and channel_id:
+                rooms[str(room_number)] = {
+                    "room_number": room_number,
+                    "channel_id": channel_id,
+                    "invite_link": invite_link,
+                    "status": "free",
+                    "current_deal_id": None,
+                    "sender_user": None,
+                    "mentioned_user": None
+                }
+                save_rooms()
+                created_count += 1
+                print(f"Created room {room_number}")
+
+            await asyncio.sleep(2)
+
+        except Exception as e:
+            print(f"Error creating room {room_number}: {e}")
+            continue
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ Setup complete! Created {created_count} new rooms. "
+             f"Total rooms: {len(rooms)}"
+    )
+
+
 async def main():
     load_allowed_users()
     load_group_data()
     load_deals()
+    load_rooms()
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("escrow", escrow))
+    app.add_handler(CommandHandler("setup_rooms", setup_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
