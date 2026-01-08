@@ -51,10 +51,11 @@ from telethon.tl.functions.messages import (  # noqa: E402
     EditChatAboutRequest
 )
 from telethon.tl.functions.channels import (  # noqa: E402
-    ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest
+    ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest,
+    EditBannedRequest
 )
 from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
-from telethon.tl.types import ChatAdminRights, Channel  # noqa: E402
+from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights  # noqa: E402
 
 
 API_ID = os.environ.get("API_ID")
@@ -991,6 +992,30 @@ async def create_escrow_group(
             ))
         except Exception as about_error:
             log_warning(f"Room {room_number}: Could not set description - {about_error}")
+
+        try:
+            from telethon.tl.functions.channels import EditChatDefaultBannedRightsRequest
+            default_banned_rights = ChatBannedRights(
+                until_date=None,
+                view_messages=False,
+                send_messages=False,
+                send_media=False,
+                send_stickers=False,
+                send_gifs=False,
+                send_games=False,
+                send_inline=False,
+                embed_links=False,
+                send_polls=False,
+                change_info=True,
+                invite_users=True,
+                pin_messages=True
+            )
+            await userbot_client(EditChatDefaultBannedRightsRequest(
+                peer=channel_id,
+                banned_rights=default_banned_rights
+            ))
+        except Exception as perm_error:
+            log_warning(f"Room {room_number}: Could not set default permissions - {perm_error}")
 
         try:
             admin_rights = ChatAdminRights(
