@@ -55,15 +55,23 @@ SOL_DEPOSIT_ADDRESSES = [
     "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"
 ]
 
+USDC_BSC_QR_IMAGES = ["usdc_bsc_qr.jpg", "usdc_bsc_qr_2.jpg"]
+USDC_BSC_DEPOSIT_ADDRESSES = [
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+]
+
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
     "POLYGON": POLYGON_DEPOSIT_ADDRESSES[0],
-    "SOL": SOL_DEPOSIT_ADDRESSES[0]
+    "SOL": SOL_DEPOSIT_ADDRESSES[0],
+    "USDC_BSC": USDC_BSC_DEPOSIT_ADDRESSES[0]
 }
 
 bsc_address_index = 0
 polygon_address_index = 0
 sol_address_index = 0
+usdc_bsc_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
 
@@ -229,7 +237,8 @@ def get_network_display_name(network):
     mapping = {
         'BSC': 'BEP20',
         'POLYGON': 'POLYGON',
-        'SOL': 'SOLANA'
+        'SOL': 'SOLANA',
+        'USDC_BSC': 'BEP20'
     }
     return mapping.get(network, network)
 
@@ -248,6 +257,9 @@ def get_network_buttons(deal_id):
         [
             InlineKeyboardButton(
                 "USDT[SOL]", callback_data=f"network_{deal_id}_SOL"
+            ),
+            InlineKeyboardButton(
+                "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"
             )
         ],
         [
@@ -361,6 +373,15 @@ def get_sol_deposit_info():
     return address, qr_image
 
 
+def get_usdc_bsc_deposit_info():
+    """Get rotating USDC BSC deposit address and QR image."""
+    global usdc_bsc_address_index
+    address = USDC_BSC_DEPOSIT_ADDRESSES[usdc_bsc_address_index]
+    qr_image = USDC_BSC_QR_IMAGES[usdc_bsc_address_index]
+    usdc_bsc_address_index = (usdc_bsc_address_index + 1) % len(USDC_BSC_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -379,6 +400,10 @@ def build_deposit_message(deal, deal_id):
         deal['qr_image'] = qr_image
     elif network == "SOL":
         deposit_address, qr_image = get_sol_deposit_info()
+        deal['deposit_address'] = deposit_address
+        deal['qr_image'] = qr_image
+    elif network == "USDC_BSC":
+        deposit_address, qr_image = get_usdc_bsc_deposit_info()
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
     else:
@@ -1213,7 +1238,7 @@ async def handle_callback(
             deposit_text = build_deposit_message(deal, deal_id)
             network = deal.get('network', 'BSC')
 
-            if network in ['BSC', 'POLYGON', 'SOL']:
+            if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC']:
                 import os
                 qr_image = deal.get('qr_image')
                 qr_path = os.path.join(
