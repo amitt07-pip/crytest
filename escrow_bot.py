@@ -68,6 +68,7 @@ ALLOWED_USERS_FILE = "allowed_users.json"
 GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
+BANNED_USERS_FILE = "banned_users.json"
 BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
 POLYGON_QR_IMAGES = ["polygon_deposit_qr.jpg", "polygon_qr_2.jpg"]
 SOL_QR_IMAGES = ["sol_deposit_qr.jpg", "sol_qr_2.jpg"]
@@ -144,6 +145,7 @@ allowed_users = {}
 group_data = {}
 deals = {}
 rooms = {}
+banned_users = {}
 
 
 def load_allowed_users():
@@ -200,6 +202,32 @@ def load_rooms():
 def save_rooms():
     with open(ROOMS_FILE, "w") as f:
         json.dump(rooms, f)
+
+
+def load_banned_users():
+    global banned_users
+    try:
+        with open(BANNED_USERS_FILE, "r") as f:
+            banned_users = json.load(f)
+    except FileNotFoundError:
+        banned_users = {}
+
+
+def save_banned_users():
+    with open(BANNED_USERS_FILE, "w") as f:
+        json.dump(banned_users, f)
+
+
+def is_user_banned(user_id, username):
+    """Check if a user is banned by ID or username."""
+    if str(user_id) in banned_users:
+        return True
+    if username:
+        username_clean = username.lstrip('@').lower()
+        for banned_key, banned_data in banned_users.items():
+            if banned_data.get('username', '').lower() == username_clean:
+                return True
+    return False
 
 
 def get_free_room():
@@ -2178,7 +2206,16 @@ async def handle_join_request(
 
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender = update.effective_user.username
+    user_id = update.effective_user.id
     chat_id = update.effective_chat.id
+
+    # Check if user is banned
+    if is_user_banned(user_id, sender):
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="You are banned from using this bot."
+        )
+        return
 
     if not context.args:
         await context.bot.send_message(
@@ -2440,11 +2477,290 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Display professional status of all rooms."""
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if not rooms:
+        await update.message.reply_text("No rooms configured yet. Use /setup_rooms to create rooms.")
+        return
+
+    total_rooms = len(rooms)
+    free_rooms = sum(1 for r in rooms.values() if r.get('status') == 'free')
+    busy_rooms = total_rooms - free_rooms
+
+    header = (
+        "<b>ESCROW ROOMS STATUS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>Total Rooms:</b> {total_rooms}\n"
+        f"<b>Available:</b> {free_rooms}\n"
+        f"<b>In Use:</b> {busy_rooms}\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>ROOM DETAILS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    room_details = ""
+    for room_num in sorted(rooms.keys(), key=lambda x: int(x)):
+        room_data = rooms[room_num]
+        status = room_data.get('status', 'unknown')
+        status_icon = "🟢" if status == 'free' else "🔴"
+        status_text = "Available" if status == 'free' else "In Use"
+
+        room_details += f"{status_icon} <b>Room {room_num}</b> - {status_text}\n"
+
+        if status == 'busy':
+            sender = room_data.get('sender_user', 'N/A')
+            mentioned = room_data.get('mentioned_user', 'N/A')
+            deal_id = room_data.get('current_deal_id', 'N/A')
+            room_details += f"    ├ Seller: {sender}\n"
+            room_details += f"    ├ Buyer: {mentioned}\n"
+            if deal_id:
+                room_details += f"    └ Deal: #{deal_id}\n"
+            else:
+                room_details += f"    └ Deal: Pending\n"
+        room_details += "\n"
+
+    footer = (
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"<i>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
+    )
+
+    await update.message.reply_text(
+        header + room_details + footer,
+        parse_mode="HTML"
+    )
+
+
+async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Free all rooms and kick all members from them."""
+    global userbot_client, deals, rooms
+
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    await update.message.reply_text("Emptying all rooms... This may take a moment.")
+
+    total_kicked = 0
+    rooms_cleaned = 0
+
+    bot_info = await context.bot.get_me()
+    bot_id = bot_info.id
+    userbot_me = await userbot_client.get_me()
+    userbot_id = userbot_me.id
+    protected_ids = set([bot_id, userbot_id, 6662820986])
+
+    for room_num, room_data in rooms.items():
+        channel_id = room_data.get('channel_id')
+        if not channel_id:
+            continue
+
+        full_channel_id = f"-100{channel_id}"
+
+        # Clear deals for this room
+        for deal_id, deal in list(deals.items()):
+            if str(deal.get('chat_id')) == full_channel_id:
+                del deals[deal_id]
+                log_info(f"Deal #{deal_id} removed (empty command)")
+
+        # Kick all members
+        try:
+            from telethon.tl.functions.channels import GetParticipantsRequest
+            from telethon.tl.types import ChannelParticipantsRecent
+            participants = await userbot_client(GetParticipantsRequest(
+                channel=int(full_channel_id),
+                filter=ChannelParticipantsRecent(),
+                offset=0,
+                limit=100,
+                hash=0
+            ))
+
+            for user in participants.users:
+                if user.id not in protected_ids:
+                    try:
+                        ban_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=True
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=int(full_channel_id),
+                            participant=user.id,
+                            banned_rights=ban_rights
+                        ))
+                        unban_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=False,
+                            send_messages=False,
+                            send_media=False,
+                            send_stickers=False,
+                            send_gifs=False,
+                            send_games=False,
+                            send_inline=False,
+                            embed_links=False
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=int(full_channel_id),
+                            participant=user.id,
+                            banned_rights=unban_rights
+                        ))
+                        total_kicked += 1
+                    except Exception:
+                        pass
+        except Exception as e:
+            log_warning(f"Could not process room {room_num}: {e}")
+
+        # Mark room as free
+        mark_room_free(room_num)
+        rooms_cleaned += 1
+
+    save_deals()
+
+    await update.message.reply_text(
+        f"<b>All Rooms Emptied</b>\n\n"
+        f"Rooms cleaned: {rooms_cleaned}\n"
+        f"Members removed: {total_kicked}\n\n"
+        f"All rooms are now available for new deals.",
+        parse_mode="HTML"
+    )
+
+
+async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ban a user from using bot commands."""
+    global banned_users
+
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b>\n"
+            "<code>/ban @username</code> - Ban by username\n"
+            "<code>/ban 123456789</code> - Ban by user ID",
+            parse_mode="HTML"
+        )
+        return
+
+    target = context.args[0]
+
+    # Check if it's a user ID (numeric) or username
+    if target.isdigit():
+        ban_id = target
+        ban_username = None
+        display_name = f"User ID: {ban_id}"
+    else:
+        ban_username = target.lstrip('@').lower()
+        ban_id = f"username_{ban_username}"
+        display_name = f"@{ban_username}"
+
+    if ban_id in banned_users:
+        await update.message.reply_text(f"{display_name} is already banned.")
+        return
+
+    banned_users[ban_id] = {
+        "username": ban_username,
+        "banned_by": user_id,
+        "banned_at": datetime.now().isoformat()
+    }
+    save_banned_users()
+
+    await update.message.reply_text(
+        f"<b>User Banned</b>\n\n"
+        f"{display_name} has been banned from using bot commands.",
+        parse_mode="HTML"
+    )
+    log_info(f"User {display_name} banned by admin {user_id}")
+
+
+async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unban a user from using bot commands."""
+    global banned_users
+
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b>\n"
+            "<code>/unban @username</code> - Unban by username\n"
+            "<code>/unban 123456789</code> - Unban by user ID",
+            parse_mode="HTML"
+        )
+        return
+
+    target = context.args[0]
+
+    # Check if it's a user ID (numeric) or username
+    if target.isdigit():
+        ban_id = target
+        display_name = f"User ID: {ban_id}"
+    else:
+        ban_username = target.lstrip('@').lower()
+        ban_id = f"username_{ban_username}"
+        display_name = f"@{ban_username}"
+
+    if ban_id not in banned_users:
+        await update.message.reply_text(f"{display_name} is not banned.")
+        return
+
+    del banned_users[ban_id]
+    save_banned_users()
+
+    await update.message.reply_text(
+        f"<b>User Unbanned</b>\n\n"
+        f"{display_name} can now use bot commands again.",
+        parse_mode="HTML"
+    )
+    log_info(f"User {display_name} unbanned by admin {user_id}")
+
+
+async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """List all banned users."""
+    user_id = update.effective_user.id
+
+    if user_id not in ADMIN_USER_IDS:
+        await update.message.reply_text("Only admins can use this command.")
+        return
+
+    if not banned_users:
+        await update.message.reply_text("No users are currently banned.")
+        return
+
+    msg = "<b>BANNED USERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    for ban_id, ban_data in banned_users.items():
+        username = ban_data.get('username')
+        banned_at = ban_data.get('banned_at', 'Unknown')
+        if username:
+            msg += f"• @{username}\n"
+        else:
+            msg += f"• ID: {ban_id}\n"
+        msg += f"  <i>Banned: {banned_at[:10] if len(banned_at) > 10 else banned_at}</i>\n\n"
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
 async def main():
     load_allowed_users()
     load_group_data()
     load_deals()
     load_rooms()
+    load_banned_users()
     log_info("Database initialized")
 
     # Log room status
@@ -2458,6 +2774,10 @@ async def main():
     if active_deals > 0:
         log_info(f"Active deals: {active_deals}")
 
+    # Log banned users
+    if banned_users:
+        log_info(f"Banned users: {len(banned_users)}")
+
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -2465,6 +2785,11 @@ async def main():
     app.add_handler(CommandHandler("setup_rooms", setup_rooms))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
+    app.add_handler(CommandHandler("rooms", rooms_status))
+    app.add_handler(CommandHandler("empty", empty_all_rooms))
+    app.add_handler(CommandHandler("ban", ban_user))
+    app.add_handler(CommandHandler("unban", unban_user))
+    app.add_handler(CommandHandler("banned", list_banned))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
