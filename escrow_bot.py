@@ -2300,14 +2300,30 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for user in participants.users:
                 if user.id not in protected_ids:
                     try:
-                        kick_rights = ChatBannedRights(
+                        ban_rights = ChatBannedRights(
                             until_date=None,
                             view_messages=True
                         )
                         await userbot_client(EditBannedRequest(
                             channel=chat_id,
                             participant=user.id,
-                            banned_rights=kick_rights
+                            banned_rights=ban_rights
+                        ))
+                        unban_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=False,
+                            send_messages=False,
+                            send_media=False,
+                            send_stickers=False,
+                            send_gifs=False,
+                            send_games=False,
+                            send_inline=False,
+                            embed_links=False
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=chat_id,
+                            participant=user.id,
+                            banned_rights=unban_rights
                         ))
                         kicked_count += 1
                     except Exception as kick_error:
