@@ -2340,11 +2340,6 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global userbot_client, deals, rooms
 
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
-
-    if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
-        return
 
     if userbot_client is None:
         await init_userbot()
