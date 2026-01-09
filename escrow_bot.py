@@ -2869,6 +2869,37 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="HTML")
 
 
+async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all available commands."""
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
+    user_id = update.effective_user.id
+    is_admin = user_id in ADMIN_USER_IDS
+
+    msg = "<b>📋 AVAILABLE COMMANDS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+
+    # General commands (available to everyone)
+    msg += "<b>General Commands:</b>\n"
+    msg += "/escrow @username - Start a new escrow deal\n"
+    msg += "/exampleform - Show sample deal form format\n"
+    msg += "/clean - Clean up room after deal completion\n"
+    msg += "/cmd - Show this command list\n\n"
+
+    # Admin commands
+    if is_admin:
+        msg += "<b>Admin Commands:</b>\n"
+        msg += "/rooms - View all room statuses\n"
+        msg += "/empty - Empty all rooms and reset deals\n"
+        msg += "/ban @username - Ban a user from using the bot\n"
+        msg += "/unban @username - Unban a user\n"
+        msg += "/banned - List all banned users\n"
+        msg += "/setup_rooms - Initialize room pool\n"
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
 async def main():
     load_allowed_users()
     load_group_data()
@@ -2904,6 +2935,7 @@ async def main():
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
     app.add_handler(CommandHandler("banned", list_banned))
+    app.add_handler(CommandHandler("cmd", cmd_list))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
