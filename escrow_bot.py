@@ -2205,6 +2205,10 @@ async def handle_join_request(
 
 
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     sender = update.effective_user.username
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
