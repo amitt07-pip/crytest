@@ -451,7 +451,11 @@ def build_deposit_message(deal, deal_id):
     amount = deal.get('amount_crypto', '0')
     seller = deal['seller']
 
-    if network == "BSC":
+    # Check if deal already has deposit address assigned (avoid re-rotation)
+    if deal.get('deposit_address'):
+        deposit_address = deal['deposit_address']
+        qr_image = deal.get('qr_image')
+    elif network == "BSC":
         deposit_address, qr_image = get_bsc_deposit_info()
         deal['deposit_address'] = deposit_address
         deal['qr_image'] = qr_image
