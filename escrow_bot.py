@@ -1322,11 +1322,16 @@ async def handle_callback(
                 summary_msg_id = sent.message_id
                 deal['summary_msg_id'] = summary_msg_id
             else:
-                await query.edit_message_text(
-                    text=summary_text,
-                    parse_mode="HTML"
-                )
-                summary_msg_id = query.message.message_id
+                try:
+                    await query.edit_message_text(
+                        text=summary_text,
+                        parse_mode="HTML"
+                    )
+                    summary_msg_id = query.message.message_id
+                    deal['summary_msg_id'] = summary_msg_id
+                except Exception as edit_error:
+                    log_warning(f"Could not edit message: {edit_error}")
+                    summary_msg_id = query.message.message_id
 
             try:
                 msg_to_pin = deal.get('summary_msg_id', summary_msg_id)
