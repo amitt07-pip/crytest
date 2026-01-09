@@ -232,10 +232,11 @@ def is_user_banned(user_id, username):
     return False
 
 
-def build_deal_log_message(buyer, seller, room_num, status):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status):
     """Build the deal log message for the log channel."""
     return (
         f"🆕 <b>New Deal Started!</b>\n\n"
+        f"🔖 <b>Deal ID:</b> #{deal_id}\n"
         f"👤 <b>Buyer:</b> {buyer}\n"
         f"💼 <b>Seller:</b> {seller}\n"
         f"🏠 <b>Group:</b> Room {room_num}\n"
@@ -246,7 +247,7 @@ def build_deal_log_message(buyer, seller, room_num, status):
 async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started"):
     """Send initial deal log message to the log channel."""
     try:
-        msg = build_deal_log_message(buyer, seller, room_num, status)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status)
         sent_msg = await bot.send_message(
             chat_id=DEAL_LOG_CHANNEL_ID,
             text=msg,
@@ -278,7 +279,7 @@ async def update_deal_log(bot, deal_id, status):
         seller = deal.get('sender_user', 'N/A')
         room_num = deal.get('room_number', 'N/A')
         
-        msg = build_deal_log_message(buyer, seller, room_num, status)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
