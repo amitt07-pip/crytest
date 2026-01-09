@@ -1357,6 +1357,7 @@ async def handle_callback(
                 log_warning(f"Could not pin message: {pin_error}")
 
             deposit_text = build_deposit_message(deal, deal_id)
+            save_deals()  # Save deposit_address immediately to prevent rotation issues
             network = deal.get('network', 'BSC')
 
             if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON', 'USDC_SOL']:
