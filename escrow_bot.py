@@ -484,7 +484,7 @@ def build_deposit_message(deal, deal_id):
         deal['qr_image'] = qr_image
 
     msg = (
-        f"Deal [{deal_id}]\n"
+        f"Deal [#{deal_id}]\n"
         f"NOTE: {seller} [Seller] <b>DEPOSIT EXACT</b> "
         f"<b><u>{amount}</u></b> <b>{currency}</b>. "
         f"DO NOT INCLUDE NETWORK FEE, make sure the amount received is "
@@ -1478,7 +1478,7 @@ async def handle_callback(
             pass
 
         payment_check_msg = (
-            f"<b><u>Deal</u></b> [{deal_id}]\n\n"
+            f"<b><u>Deal</u></b> [#{deal_id}]\n\n"
             f"Payment will Be checked on Blockchain for next 5 mins. "
             f"You will be notified once payment is confirmed. Thanks!"
         )
