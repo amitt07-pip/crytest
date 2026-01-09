@@ -1199,21 +1199,27 @@ async def handle_callback(
     if data == "switch_to_usdc":
         new_text = get_form_text("USDC")
         new_keyboard = get_form_keyboard("USDC")
-        await query.edit_message_text(
-            text=new_text,
-            parse_mode="HTML",
-            reply_markup=new_keyboard
-        )
+        try:
+            await query.edit_message_text(
+                text=new_text,
+                parse_mode="HTML",
+                reply_markup=new_keyboard
+            )
+        except Exception:
+            pass
         return
 
     if data == "switch_to_usdt":
         new_text = get_form_text("USDT")
         new_keyboard = get_form_keyboard("USDT")
-        await query.edit_message_text(
-            text=new_text,
-            parse_mode="HTML",
-            reply_markup=new_keyboard
-        )
+        try:
+            await query.edit_message_text(
+                text=new_text,
+                parse_mode="HTML",
+                reply_markup=new_keyboard
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith("network_"):
@@ -1249,11 +1255,14 @@ async def handle_callback(
             f"as selected by the seller."
         )
 
-        await query.edit_message_text(
-            text=new_text,
-            parse_mode="HTML",
-            reply_markup=get_cancel_only_button(deal_id)
-        )
+        try:
+            await query.edit_message_text(
+                text=new_text,
+                parse_mode="HTML",
+                reply_markup=get_cancel_only_button(deal_id)
+            )
+        except Exception:
+            pass
 
         chat_id = query.message.chat_id
 
@@ -1415,7 +1424,10 @@ async def handle_callback(
             payment_type = deal.get('payment_details_type', 'text')
             if payment_type == 'photo':
                 photo_id = deal.get('payment_details')
-                await query.message.delete()
+                try:
+                    await query.message.delete()
+                except Exception:
+                    pass
                 sent = await context.bot.send_photo(
                     chat_id=query.message.chat_id,
                     photo=photo_id,
@@ -1426,11 +1438,14 @@ async def handle_callback(
                 deal['summary_msg_id'] = sent.message_id
                 save_deals()
             else:
-                await query.edit_message_text(
-                    text=summary_text,
-                    parse_mode="HTML",
-                    reply_markup=get_confirm_buttons(deal_id)
-                )
+                try:
+                    await query.edit_message_text(
+                        text=summary_text,
+                        parse_mode="HTML",
+                        reply_markup=get_confirm_buttons(deal_id)
+                    )
+                except Exception:
+                    pass
         return
 
     if data.startswith("ihavepaid_"):
@@ -1448,16 +1463,19 @@ async def handle_callback(
             return
 
         deposit_text = build_deposit_message(deal, deal_id)
-        if query.message.photo:
-            await query.edit_message_caption(
-                caption=deposit_text,
-                parse_mode="HTML"
-            )
-        else:
-            await query.edit_message_text(
-                text=deposit_text,
-                parse_mode="HTML"
-            )
+        try:
+            if query.message.photo:
+                await query.edit_message_caption(
+                    caption=deposit_text,
+                    parse_mode="HTML"
+                )
+            else:
+                await query.edit_message_text(
+                    text=deposit_text,
+                    parse_mode="HTML"
+                )
+        except Exception:
+            pass
 
         payment_check_msg = (
             f"<b><u>Deal</u></b> [{deal_id}]\n\n"
@@ -1510,10 +1528,13 @@ async def handle_callback(
         deal_id = parts[1]
 
         if deal_id not in deals:
-            await query.edit_message_text(
-                text="Deal has been cancelled.",
-                parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text="Deal has been cancelled.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
             return
 
         deal = deals[deal_id]
@@ -1533,10 +1554,13 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
-        await query.edit_message_text(
-            text="Deal has been cancelled.",
-            parse_mode="HTML"
-        )
+        try:
+            await query.edit_message_text(
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith("adminconfirm_"):
@@ -1564,7 +1588,10 @@ async def handle_callback(
         deal['status'] = 'payment_received'
         save_deals()
 
-        await query.message.delete()
+        try:
+            await query.message.delete()
+        except Exception:
+            pass
 
         detected_msg = build_payment_detected_message(
             deal_id, deal_amount, deal_amount, str(deal_amount), currency
@@ -1625,10 +1652,13 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
-        await query.edit_message_text(
-            text="Deal cancelled by admin.",
-            parse_mode="HTML"
-        )
+        try:
+            await query.edit_message_text(
+                text="Deal cancelled by admin.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith("depositcancel_"):
@@ -1650,10 +1680,13 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
-        await query.edit_message_text(
-            text="Deal cancelled by admin.",
-            parse_mode="HTML"
-        )
+        try:
+            await query.edit_message_text(
+                text="Deal cancelled by admin.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
         return
 
     if data.startswith("release_") and not data.startswith("release_confirm_"):
@@ -1683,7 +1716,10 @@ async def handle_callback(
         )
 
         # Remove buttons from original message
-        await query.edit_message_reply_markup(reply_markup=None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
         keyboard = [
             [InlineKeyboardButton(
@@ -1723,7 +1759,10 @@ async def handle_callback(
             return
 
         # Remove buttons from confirmation message
-        await query.edit_message_reply_markup(reply_markup=None)
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
         seller = deal['seller']
         buyer = deal['buyer']
@@ -1768,10 +1807,13 @@ async def handle_callback(
         deal_id = parts[1]
 
         if deal_id not in deals:
-            await query.edit_message_text(
-                text="Deal has been cancelled.",
-                parse_mode="HTML"
-            )
+            try:
+                await query.edit_message_text(
+                    text="Deal has been cancelled.",
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
             return
 
         deal = deals[deal_id]
@@ -1788,10 +1830,13 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
-        await query.edit_message_text(
-            text="Deal has been cancelled.",
-            parse_mode="HTML"
-        )
+        try:
+            await query.edit_message_text(
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
         return
 
 
