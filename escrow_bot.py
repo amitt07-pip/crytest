@@ -114,7 +114,9 @@ polygon_address_index = 0
 sol_address_index = 0
 usdc_bsc_address_index = 0
 
-ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986]
+ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
+
+DEAL_LOG_CHANNEL_ID = -1003521524337
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
@@ -228,6 +230,65 @@ def is_user_banned(user_id, username):
             if banned_data.get('username', '').lower() == username_clean:
                 return True
     return False
+
+
+def build_deal_log_message(buyer, seller, room_num, status):
+    """Build the deal log message for the log channel."""
+    return (
+        f"🆕 <b>New Deal Started!</b>\n\n"
+        f"👤 <b>Buyer:</b> {buyer}\n"
+        f"💼 <b>Seller:</b> {seller}\n"
+        f"🏠 <b>Group:</b> Room {room_num}\n"
+        f"📊 <b>Current Status:</b> {status}"
+    )
+
+
+async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started"):
+    """Send initial deal log message to the log channel."""
+    try:
+        msg = build_deal_log_message(buyer, seller, room_num, status)
+        sent_msg = await bot.send_message(
+            chat_id=DEAL_LOG_CHANNEL_ID,
+            text=msg,
+            parse_mode="HTML"
+        )
+        # Store the log message ID in the deal for future updates
+        if deal_id in deals:
+            deals[deal_id]['log_message_id'] = sent_msg.message_id
+            save_deals()
+        log_info(f"Deal log sent for #{deal_id}")
+        return sent_msg.message_id
+    except Exception as e:
+        log_error(f"Failed to send deal log: {e}")
+        return None
+
+
+async def update_deal_log(bot, deal_id, status):
+    """Update the deal log message with new status."""
+    try:
+        if deal_id not in deals:
+            return
+        
+        deal = deals[deal_id]
+        log_message_id = deal.get('log_message_id')
+        if not log_message_id:
+            return
+        
+        buyer = deal.get('mentioned_user', 'N/A')
+        seller = deal.get('sender_user', 'N/A')
+        room_num = deal.get('room_number', 'N/A')
+        
+        msg = build_deal_log_message(buyer, seller, room_num, status)
+        
+        await bot.edit_message_text(
+            chat_id=DEAL_LOG_CHANNEL_ID,
+            message_id=log_message_id,
+            text=msg,
+            parse_mode="HTML"
+        )
+        log_info(f"Deal log updated for #{deal_id}: {status}")
+    except Exception as e:
+        log_error(f"Failed to update deal log: {e}")
 
 
 def get_free_room():
@@ -924,6 +985,9 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             deal['status'] = 'payment_received'
             save_deals()
 
+            # Update deal log - Payment Detected
+            await update_deal_log(bot, deal_id, "Payment Detected")
+
             detected_msg = build_payment_detected_message(
                 deal_id, latest_amount, total_received, deal_amount, currency
             )
@@ -932,6 +996,9 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                 text=detected_msg,
                 parse_mode="HTML"
             )
+
+            # Update deal log - Payment Received
+            await update_deal_log(bot, deal_id, "Payment Received")
 
             received_msg = build_usdt_received_message(
                 deal, deal_id, total_received
@@ -1288,6 +1355,9 @@ async def handle_callback(
         deal['status'] = 'pending_buyer_address'
         save_deals()
 
+        # Update deal log
+        await update_deal_log(context.bot, deal_id, "Network Selected")
+
         network_name = get_network_display_name(network)
         seller = deal['seller']
         buyer = deal['buyer']
@@ -1443,6 +1513,9 @@ async def handle_callback(
             deal['latest_msg_id'] = sent_deposit.message_id
             save_deals()
 
+            # Update deal log
+            await update_deal_log(context.bot, deal_id, "Deposit Address Sent")
+
             # Add CURRENT STAGE button to Both Confirmed message
             channel_id_str = str(chat_id).replace("-100", "")
             msg_link = f"https://t.me/c/{channel_id_str}/{sent_deposit.message_id}"
@@ -1540,6 +1613,9 @@ async def handle_callback(
 
         deal['status'] = 'payment_checking'
         save_deals()
+
+        # Update deal log
+        await update_deal_log(context.bot, deal_id, "Payment Checking")
 
         await update_current_stage_button(
             context.bot, deal, query.message.chat_id, sent_check.message_id
@@ -1819,6 +1895,9 @@ async def handle_callback(
         escrow_fee = calculate_escrow_fee(float(amount))
         withdrawal_amount = float(amount) - escrow_fee
         buyer_address = deal.get('buyer_address', 'N/A')
+
+        # Update deal log - Deal Completed (before deleting deal)
+        await update_deal_log(context.bot, deal_id, "Deal Completed")
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -2101,6 +2180,10 @@ async def handle_message(
             'amount_usdc', ''
         )
 
+        # Get room number from chat_id
+        room_info = get_room_by_channel_id(str(chat_id).replace("-100", ""))
+        room_num = room_info[0] if room_info else "N/A"
+
         deals[deal_id] = {
             'chat_id': chat_id,
             'seller': form_data['seller'],
@@ -2115,12 +2198,18 @@ async def handle_message(
             'seller_address': None,
             'status': 'pending_network',
             'buyer_address_msg_id': None,
-            'seller_address_msg_id': None
+            'seller_address_msg_id': None,
+            'room_number': room_num,
+            'mentioned_user': form_data['buyer'],
+            'sender_user': form_data['seller']
         }
         save_deals()
 
         seller = form_data['seller']
         buyer = form_data['buyer']
+
+        # Send deal log to log channel
+        await send_deal_log(context.bot, deal_id, buyer, seller, room_num, "Deal Started")
 
         msg = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
