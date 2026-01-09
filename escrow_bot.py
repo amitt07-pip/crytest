@@ -2479,10 +2479,14 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display professional status of all rooms."""
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     user_id = update.effective_user.id
 
+    # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
         return
 
     if not rooms:
@@ -2540,10 +2544,14 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Free all rooms and kick all members from them."""
     global userbot_client, deals, rooms
 
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     user_id = update.effective_user.id
 
+    # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
         return
 
     if userbot_client is None:
@@ -2638,10 +2646,14 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ban a user from using bot commands."""
     global banned_users
 
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     user_id = update.effective_user.id
 
+    # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
         return
 
     if not context.args:
@@ -2688,10 +2700,14 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Unban a user from using bot commands."""
     global banned_users
 
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     user_id = update.effective_user.id
 
+    # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
         return
 
     if not context.args:
@@ -2731,10 +2747,14 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all banned users."""
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
     user_id = update.effective_user.id
 
+    # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
-        await update.message.reply_text("Only admins can use this command.")
         return
 
     if not banned_users:
