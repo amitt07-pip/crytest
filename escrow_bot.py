@@ -125,6 +125,12 @@ USDT_CONTRACTS = {
     "SOL": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB"
 }
 
+USDC_CONTRACTS = {
+    "BSC": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+    "POLYGON": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
+    "SOL": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+}
+
 BLOCKCHAIN_APIS = {
     "BSC": "https://api.bscscan.com/api",
     "POLYGON": "https://api.polygonscan.com/api",
@@ -674,13 +680,19 @@ async def check_solana_transactions(deposit_address):
 
 async def get_transactions_for_network(network, deposit_address):
     """Get transactions based on network type."""
-    usdt_contract = USDT_CONTRACTS.get(network, "")
+    # Determine if this is USDC or USDT and get the appropriate contract
+    if network.startswith("USDC_"):
+        base_network = network.replace("USDC_", "")
+        contract = USDC_CONTRACTS.get(base_network, "")
+    else:
+        base_network = network
+        contract = USDT_CONTRACTS.get(network, "")
 
-    if network == "BSC":
-        return await check_bsc_transactions(deposit_address, usdt_contract)
-    elif network == "POLYGON":
-        return await check_polygon_transactions(deposit_address, usdt_contract)
-    elif network == "SOL":
+    if base_network == "BSC":
+        return await check_bsc_transactions(deposit_address, contract)
+    elif base_network == "POLYGON":
+        return await check_polygon_transactions(deposit_address, contract)
+    elif base_network == "SOL":
         return await check_solana_transactions(deposit_address)
 
     return []
@@ -688,12 +700,15 @@ async def get_transactions_for_network(network, deposit_address):
 
 def parse_transaction_amount(tx, network):
     """Parse transaction amount from API response."""
-    if network in ["BSC", "POLYGON"]:
+    # Get base network for USDC networks
+    base_network = network.replace("USDC_", "") if network.startswith("USDC_") else network
+
+    if base_network in ["BSC", "POLYGON"]:
         value = tx.get("value", "0")
         decimals = int(tx.get("tokenDecimal", "18"))
         amount = int(value) / (10 ** decimals)
         return amount
-    elif network == "SOL":
+    elif base_network == "SOL":
         try:
             meta = tx.get("meta", {})
             pre_balances = meta.get("preBalances", [])
