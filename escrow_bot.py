@@ -1321,20 +1321,24 @@ async def handle_callback(
             if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON', 'USDC_SOL']:
                 import os
                 qr_image = deal.get('qr_image')
-                qr_path = os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)),
-                    qr_image
-                )
-                try:
-                    with open(qr_path, 'rb') as qr_file:
-                        sent_deposit = await context.bot.send_photo(
-                            chat_id=chat_id,
-                            photo=qr_file,
-                            caption=deposit_text,
-                            parse_mode="HTML",
-                            reply_markup=get_deposit_buttons(deal_id)
-                        )
-                except FileNotFoundError:
+                sent_deposit = None
+                if qr_image:
+                    qr_path = os.path.join(
+                        os.path.dirname(os.path.abspath(__file__)),
+                        qr_image
+                    )
+                    try:
+                        with open(qr_path, 'rb') as qr_file:
+                            sent_deposit = await context.bot.send_photo(
+                                chat_id=chat_id,
+                                photo=qr_file,
+                                caption=deposit_text,
+                                parse_mode="HTML",
+                                reply_markup=get_deposit_buttons(deal_id)
+                            )
+                    except FileNotFoundError:
+                        pass
+                if sent_deposit is None:
                     sent_deposit = await context.bot.send_message(
                         chat_id=chat_id,
                         text=deposit_text,
