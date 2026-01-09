@@ -816,6 +816,27 @@ def build_payment_details_message(deal, deal_id):
     return msg
 
 
+async def update_current_stage_button(bot, deal, chat_id, new_msg_id):
+    """Update the CURRENT STAGE button on the pinned message to point to the latest message."""
+    summary_msg_id = deal.get('summary_msg_id')
+    if not summary_msg_id:
+        return
+
+    try:
+        channel_id_str = str(chat_id).replace("-100", "")
+        msg_link = f"https://t.me/c/{channel_id_str}/{new_msg_id}"
+        current_stage_keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("CURRENT STAGE", url=msg_link)]
+        ])
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=summary_msg_id,
+            reply_markup=current_stage_keyboard
+        )
+    except Exception:
+        pass
+
+
 async def monitor_blockchain(deal_id, chat_id, bot):
     """Monitor blockchain for incoming transactions."""
     global deals, active_monitors
@@ -879,7 +900,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             if payment_type == 'photo':
                 photo_id = deal.get('payment_details')
                 details_msg = build_payment_details_message(deal, deal_id)
-                await bot.send_photo(
+                sent_details = await bot.send_photo(
                     chat_id=chat_id,
                     photo=photo_id,
                     caption=details_msg,
@@ -887,11 +908,13 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                 )
             else:
                 details_msg = build_payment_details_message(deal, deal_id)
-                await bot.send_message(
+                sent_details = await bot.send_message(
                     chat_id=chat_id,
                     text=details_msg,
                     parse_mode="HTML"
                 )
+
+            await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
 
             if deal_id in active_monitors:
                 del active_monitors[deal_id]
@@ -1437,7 +1460,7 @@ async def handle_callback(
             f"You will be notified once payment is confirmed. Thanks!"
         )
 
-        await context.bot.send_message(
+        sent_check = await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=payment_check_msg,
             parse_mode="HTML",
@@ -1446,6 +1469,10 @@ async def handle_callback(
 
         deal['status'] = 'payment_checking'
         save_deals()
+
+        await update_current_stage_button(
+            context.bot, deal, query.message.chat_id, sent_check.message_id
+        )
 
         active_monitors[deal_id] = True
         asyncio.create_task(
@@ -1555,7 +1582,7 @@ async def handle_callback(
         if payment_type == 'photo':
             photo_id = deal.get('payment_details')
             details_msg = build_payment_details_message(deal, deal_id)
-            await context.bot.send_photo(
+            sent_details = await context.bot.send_photo(
                 chat_id=query.message.chat_id,
                 photo=photo_id,
                 caption=details_msg,
@@ -1563,11 +1590,15 @@ async def handle_callback(
             )
         else:
             details_msg = build_payment_details_message(deal, deal_id)
-            await context.bot.send_message(
+            sent_details = await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=details_msg,
                 parse_mode="HTML"
             )
+
+        await update_current_stage_button(
+            context.bot, deal, query.message.chat_id, sent_details.message_id
+        )
         return
 
     if data.startswith("admincancel_"):
@@ -1660,11 +1691,15 @@ async def handle_callback(
             )]
         ]
 
-        await context.bot.send_message(
+        sent_confirm = await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=confirm_msg,
             parse_mode="HTML",
             reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+        await update_current_stage_button(
+            context.bot, deal, query.message.chat_id, sent_confirm.message_id
         )
         return
 
