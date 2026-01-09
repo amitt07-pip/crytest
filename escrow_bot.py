@@ -2870,13 +2870,16 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show all available commands."""
+    """Show all available commands (admin only)."""
     # Only work in groups, not DMs
     if update.effective_chat.type == "private":
         return
 
     user_id = update.effective_user.id
-    is_admin = user_id in ADMIN_USER_IDS
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
 
     msg = "<b>📋 AVAILABLE COMMANDS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -2884,18 +2887,17 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += "<b>General Commands:</b>\n"
     msg += "/escrow @username - Start a new escrow deal\n"
     msg += "/exampleform - Show sample deal form format\n"
-    msg += "/clean - Clean up room after deal completion\n"
-    msg += "/cmd - Show this command list\n\n"
+    msg += "/clean - Clean up room after deal completion\n\n"
 
     # Admin commands
-    if is_admin:
-        msg += "<b>Admin Commands:</b>\n"
-        msg += "/rooms - View all room statuses\n"
-        msg += "/empty - Empty all rooms and reset deals\n"
-        msg += "/ban @username - Ban a user from using the bot\n"
-        msg += "/unban @username - Unban a user\n"
-        msg += "/banned - List all banned users\n"
-        msg += "/setup_rooms - Initialize room pool\n"
+    msg += "<b>Admin Commands:</b>\n"
+    msg += "/cmd - Show this command list\n"
+    msg += "/rooms - View all room statuses\n"
+    msg += "/empty - Empty all rooms and reset deals\n"
+    msg += "/ban @username - Ban a user from using the bot\n"
+    msg += "/unban @username - Unban a user\n"
+    msg += "/banned - List all banned users\n"
+    msg += "/setup_rooms - Initialize room pool\n"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
