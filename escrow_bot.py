@@ -2345,6 +2345,7 @@ async def main():
     load_group_data()
     load_deals()
     load_rooms()
+    log_info("Database initialized")
 
     # Log room status
     total_rooms = len(rooms)
