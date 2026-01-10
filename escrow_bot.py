@@ -232,16 +232,28 @@ def is_user_banned(user_id, username):
     return False
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status):
+def truncate_address(address):
+    """Truncate address to first 3 and last 4 characters."""
+    if not address or len(address) < 8:
+        return address or "N/A"
+    return f"{address[:3]}...{address[-4:]}"
+
+
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None):
     """Build the deal log message for the log channel."""
-    return (
+    msg = (
         f"🆕 <b>New Deal Started!</b>\n\n"
         f"🔖 <b>Deal ID:</b> #{deal_id}\n"
         f"👤 <b>Buyer:</b> {buyer}\n"
         f"💼 <b>Seller:</b> {seller}\n"
         f"🏠 <b>Group:</b> Room {room_num}\n"
-        f"📊 <b>Current Status:</b> {status}"
     )
+    
+    if deposit_address:
+        msg += f"💳 <b>Deposit Address:</b> {truncate_address(deposit_address)}\n"
+    
+    msg += f"📊 <b>Current Status:</b> {status}"
+    return msg
 
 
 async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started"):
@@ -279,7 +291,10 @@ async def update_deal_log(bot, deal_id, status):
         seller = deal.get('sender_user', 'N/A')
         room_num = deal.get('room_number', 'N/A')
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status)
+        # Include deposit address in log once it's set
+        deposit_address = deal.get('deposit_address')
+        
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
@@ -681,8 +696,14 @@ async def check_bsc_transactions(deposit_address, usdt_contract):
             async with session.get(api_url, params=params) as response:
                 if response.status == 200:
                     data = await response.json()
+                    # Log API response for debugging
+                    if data.get("status") != "1":
+                        log_warning(f"BSC API response: status={data.get('status')}, message={data.get('message')}")
                     if data.get("status") == "1" and data.get("result"):
+                        log_info(f"BSC API found {len(data['result'])} transactions for {deposit_address[:6]}...")
                         return data["result"]
+                else:
+                    log_error(f"BSC API HTTP error: {response.status}")
     except Exception as e:
         log_error(f"BSC API error: {e}")
 
