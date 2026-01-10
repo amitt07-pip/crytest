@@ -377,9 +377,11 @@ def parse_deal_form(text):
         elif 'buyer' in key:
             data['buyer'] = value
         elif 'amount' in key and 'usdt' in key.lower():
-            data['amount_usdt'] = value
+            # Strip $ sign from amount (e.g., "1000$" or "$1000" -> "1000")
+            data['amount_usdt'] = value.replace('$', '').strip()
         elif 'amount' in key and 'usdc' in key.lower():
-            data['amount_usdc'] = value
+            # Strip $ sign from amount (e.g., "1000$" or "$1000" -> "1000")
+            data['amount_usdc'] = value.replace('$', '').strip()
         elif 'amount' in key and 'inr' in key.lower():
             data['amount_inr'] = value
         elif 'payment' in key:
