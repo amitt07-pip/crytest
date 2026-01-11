@@ -246,7 +246,7 @@ def truncate_address(address):
     return f"{address[:3]}...{address[-4:]}"
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None):
     """Build the deal log message for the log channel."""
     msg = (
         f"🆕 <b>New Deal Started!</b>\n\n"
@@ -256,10 +256,13 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
         f"🏠 <b>Group:</b> Room {room_num}\n"
     )
     
+    if amount:
+        msg += f"💰 <b>Amount:</b> {amount}\n"
+    
     if deposit_address:
         msg += f"💳 <b>Deposit Address:</b> {truncate_address(deposit_address)}\n"
     
-    msg += f"📊 <b>Current Status:</b> {status}"
+    msg += f"📊 <b>Current Status:</b> <b><u>{status}</u></b>"
     return msg
 
 
@@ -301,7 +304,13 @@ async def update_deal_log(bot, deal_id, status):
         # Include deposit address in log once it's set
         deposit_address = deal.get('deposit_address')
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address)
+        # Get deal amount (USDT or USDC)
+        amount = deal.get('amount_usdt') or deal.get('amount_usdc')
+        if amount:
+            currency = "USDT" if deal.get('amount_usdt') else "USDC"
+            amount = f"{amount} {currency}"
+        
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
