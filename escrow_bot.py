@@ -1808,8 +1808,10 @@ async def handle_callback(
         if deal_id in active_monitors:
             del active_monitors[deal_id]
 
-        deal_amount = float(deal.get('amount_crypto', '0'))
-        currency = deal['currency']
+        # Get deal amount with fallback to amount_usdt/amount_usdc if amount_crypto is empty
+        amount_str = deal.get('amount_crypto') or deal.get('amount_usdt') or deal.get('amount_usdc') or '0'
+        deal_amount = float(amount_str) if amount_str else 0.0
+        currency = deal.get('currency', 'USDT')
 
         deal['received_amount'] = deal_amount
         deal['admin_confirmed'] = True
@@ -2512,7 +2514,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         chat_id=chat_id,
         text=message,
         parse_mode="HTML",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
+        reply_to_message_id=update.message.message_id
     )
 
 
