@@ -2671,10 +2671,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log_error(f"Error in clean command: {e}")
 
-    await update.message.reply_text(
-        f"Room cleaned! Removed {kicked_count} member(s). "
-        f"Room is now available for new deals."
-    )
+    await update.message.reply_text("Cleaned!")
 
 
 async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
