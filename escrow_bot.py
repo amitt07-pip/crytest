@@ -2,6 +2,7 @@ import os
 import random
 import asyncio
 import json
+import time
 import aiohttp
 import nest_asyncio
 import logging
@@ -697,11 +698,15 @@ def build_deal_summary(deal, deal_id, both_confirmed=False):
     return msg
 
 
-async def check_bsc_transactions(deposit_address, usdt_contract):
+async def check_bsc_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
     """Check BSC blockchain for USDT transactions to deposit address using NodeReal RPC.
     
     Uses eth_getLogs to query ERC20 Transfer events to the deposit address.
     NodeReal public API is free and doesn't require an API key.
+    
+    Args:
+        monitoring_start_time: Unix timestamp when monitoring started. Only transactions
+                              after this time will be considered.
     """
     try:
         async with aiohttp.ClientSession() as session:
@@ -726,8 +731,15 @@ async def check_bsc_transactions(deposit_address, usdt_contract):
                     return []
                 latest_block = int(data["result"], 16)
             
-            # Query last 10000 blocks (~8 hours on BSC with 3s block time)
-            from_block = hex(latest_block - 10000)
+            # Calculate from_block based on monitoring_start_time
+            # BSC has ~3 second block time
+            if monitoring_start_time:
+                seconds_ago = int(time.time()) - monitoring_start_time
+                blocks_ago = max(10, seconds_ago // 3 + 100)  # Add 100 blocks buffer
+                from_block = hex(latest_block - blocks_ago)
+            else:
+                # Fallback: Query last 10000 blocks (~8 hours on BSC with 3s block time)
+                from_block = hex(latest_block - 10000)
             
             # Pad deposit address to 32 bytes for topic filter
             padded_address = "0x" + deposit_address[2:].lower().zfill(64)
@@ -792,8 +804,13 @@ async def check_bsc_transactions(deposit_address, usdt_contract):
         return []
 
 
-async def check_polygon_transactions(deposit_address, usdt_contract):
-    """Check Polygon blockchain for USDT transactions."""
+async def check_polygon_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
+    """Check Polygon blockchain for USDT transactions.
+    
+    Args:
+        monitoring_start_time: Unix timestamp when monitoring started. Only transactions
+                              after this time will be considered.
+    """
     api_url = BLOCKCHAIN_APIS["POLYGON"]
     params = {
         "module": "account",
@@ -803,6 +820,10 @@ async def check_polygon_transactions(deposit_address, usdt_contract):
         "sort": "desc",
         "apikey": POLYGONSCAN_API_KEY
     }
+    
+    if monitoring_start_time:
+        params["startblock"] = 0
+        params["endblock"] = 99999999
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -810,15 +831,23 @@ async def check_polygon_transactions(deposit_address, usdt_contract):
                 if response.status == 200:
                     data = await response.json()
                     if data.get("status") == "1" and data.get("result"):
-                        return data["result"]
+                        results = data["result"]
+                        if monitoring_start_time:
+                            results = [tx for tx in results if int(tx.get("timeStamp", 0)) >= monitoring_start_time]
+                        return results
     except Exception as e:
         log_error(f"Polygon API error: {e}")
 
     return []
 
 
-async def check_solana_transactions(deposit_address):
-    """Check Solana blockchain for USDT transactions using Helius API."""
+async def check_solana_transactions(deposit_address, monitoring_start_time=None):
+    """Check Solana blockchain for USDT transactions using Helius API.
+    
+    Args:
+        monitoring_start_time: Unix timestamp when monitoring started. Only transactions
+                              after this time will be considered.
+    """
     if HELIUS_API_KEY:
         rpc_url = f"https://mainnet.helius-rpc.com/?api-key={HELIUS_API_KEY}"
     else:
@@ -841,6 +870,10 @@ async def check_solana_transactions(deposit_address):
                 if response.status == 200:
                     data = await response.json()
                     signatures = data.get("result", [])
+                    
+                    # Filter signatures by blockTime if monitoring_start_time is set
+                    if monitoring_start_time:
+                        signatures = [sig for sig in signatures if sig.get("blockTime", 0) >= monitoring_start_time]
 
                     transactions = []
                     for sig in signatures:
@@ -871,8 +904,13 @@ async def check_solana_transactions(deposit_address):
     return []
 
 
-async def get_transactions_for_network(network, deposit_address):
-    """Get transactions based on network type."""
+async def get_transactions_for_network(network, deposit_address, monitoring_start_time=None):
+    """Get transactions based on network type.
+    
+    Args:
+        monitoring_start_time: Unix timestamp when monitoring started. Only transactions
+                              after this time will be considered.
+    """
     # Determine if this is USDC or USDT and get the appropriate contract
     if network.startswith("USDC_"):
         base_network = network.replace("USDC_", "")
@@ -882,11 +920,11 @@ async def get_transactions_for_network(network, deposit_address):
         contract = USDT_CONTRACTS.get(network, "")
 
     if base_network == "BSC":
-        return await check_bsc_transactions(deposit_address, contract)
+        return await check_bsc_transactions(deposit_address, contract, monitoring_start_time)
     elif base_network == "POLYGON":
-        return await check_polygon_transactions(deposit_address, contract)
+        return await check_polygon_transactions(deposit_address, contract, monitoring_start_time)
     elif base_network == "SOL":
-        return await check_solana_transactions(deposit_address)
+        return await check_solana_transactions(deposit_address, monitoring_start_time)
 
     return []
 
@@ -1061,6 +1099,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
     deposit_address = deal.get('deposit_address', DEPOSIT_ADDRESSES.get(network, ''))
     deal_amount = deal.get('amount_crypto', '0')
     currency = deal['currency']
+    monitoring_start_time = deal.get('monitoring_start_time')
     start_time = asyncio.get_event_loop().time()
     check_interval = 30
     max_duration = 300
@@ -1071,7 +1110,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             break
 
         transactions = await get_transactions_for_network(
-            network, deposit_address
+            network, deposit_address, monitoring_start_time
         )
 
         total_received = 0
@@ -1716,6 +1755,7 @@ async def handle_callback(
         )
 
         deal['status'] = 'payment_checking'
+        deal['monitoring_start_time'] = int(time.time())
         save_deals()
 
         # Update deal log
