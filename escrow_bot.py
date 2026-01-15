@@ -2327,8 +2327,9 @@ async def handle_message(
         )
 
         # Get room number from chat_id
-        room_info = get_room_by_channel_id(str(chat_id).replace("-100", ""))
-        room_num = room_info[0] if room_info else "N/A"
+        room_num = get_room_by_channel_id(str(chat_id).replace("-100", ""))
+        if room_num is None:
+            room_num = "N/A"
 
         deals[deal_id] = {
             'chat_id': chat_id,
@@ -2879,6 +2880,102 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete all rooms from the database so they won't be used for escrow."""
+    global rooms
+
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
+    user_id = update.effective_user.id
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    room_count = len(rooms)
+    rooms = {}
+    save_rooms()
+
+    await update.message.reply_text(
+        f"<b>All Rooms Deleted</b>\n\n"
+        f"Deleted {room_count} room(s) from the database.\n"
+        f"Old rooms will no longer be used for escrow.\n\n"
+        f"Use /newrooms to create 20 new escrow rooms.",
+        parse_mode="HTML"
+    )
+    log_info(f"All {room_count} rooms deleted by admin {user_id}")
+
+
+async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Create 20 new escrow rooms."""
+    global userbot_client, rooms
+
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
+    user_id = update.effective_user.id
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    await update.message.reply_text(
+        "Creating 20 new escrow rooms... This may take a few minutes."
+    )
+
+    bot_info = await context.bot.get_me()
+    bot_username = bot_info.username
+
+    created_count = 0
+    failed_count = 0
+
+    for room_number in range(1, 21):
+        if str(room_number) in rooms:
+            continue
+
+        try:
+            invite_link, room_num, channel_id = await create_escrow_group(
+                room_number,
+                "@system",
+                "@system",
+                bot_username
+            )
+
+            if invite_link:
+                rooms[str(room_number)] = {
+                    "room_number": room_number,
+                    "channel_id": channel_id,
+                    "invite_link": invite_link,
+                    "status": "free",
+                    "current_deal_id": None,
+                    "sender_user": None,
+                    "mentioned_user": None
+                }
+                save_rooms()
+                created_count += 1
+                log_info(f"Room {room_number} created")
+            else:
+                failed_count += 1
+                log_error(f"Room {room_number}: Failed to create")
+        except Exception as e:
+            failed_count += 1
+            log_error(f"Room {room_number}: Setup failed - {e}")
+
+    await update.message.reply_text(
+        f"<b>Room Creation Complete</b>\n\n"
+        f"Created: {created_count} room(s)\n"
+        f"Failed: {failed_count} room(s)\n"
+        f"Total rooms: {len(rooms)}",
+        parse_mode="HTML"
+    )
+
+
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ban a user from using bot commands."""
     global banned_users
@@ -3037,6 +3134,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += "/cmd - Show this command list\n"
     msg += "/rooms - View all room statuses\n"
     msg += "/empty - Empty all rooms and reset deals\n"
+    msg += "/deleteall - Delete all rooms from database\n"
+    msg += "/newrooms - Create 20 new escrow rooms\n"
     msg += "/ban @username - Ban a user from using the bot\n"
     msg += "/unban @username - Unban a user\n"
     msg += "/banned - List all banned users\n"
@@ -3077,6 +3176,8 @@ async def main():
     app.add_handler(CommandHandler("clean", clean))
     app.add_handler(CommandHandler("rooms", rooms_status))
     app.add_handler(CommandHandler("empty", empty_all_rooms))
+    app.add_handler(CommandHandler("deleteall", delete_all_rooms))
+    app.add_handler(CommandHandler("newrooms", create_new_rooms))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
     app.add_handler(CommandHandler("banned", list_banned))
