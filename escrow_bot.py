@@ -74,31 +74,35 @@ BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
 POLYGON_QR_IMAGES = ["polygon_deposit_qr.jpg", "polygon_qr_2.jpg"]
 SOL_QR_IMAGES = ["sol_deposit_qr.jpg", "sol_qr_2.jpg"]
 
+# USDT Deposit Addresses
 BSC_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
-    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 POLYGON_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
-    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 SOL_DEPOSIT_ADDRESSES = [
-    "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy",
-    "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"
+    "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy",  # Address 1
+    "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"   # Address 2
 ]
 
+# USDC Deposit Addresses
 USDC_BSC_QR_IMAGES = ["usdc_bsc_qr.jpg", "usdc_bsc_qr_2.jpg"]
 USDC_BSC_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",
-    "0xf282e789e835ed379aea84ece204d2d643e6774f"
+    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
-USDC_POLYGON_DEPOSIT_ADDRESS = "0xAe6313dE2fDD754734074D8a6F4835c10827115b"
+# USDC Polygon - Address 1 only (Address 2 = same as Address 1)
+USDC_POLYGON_DEPOSIT_ADDRESS = "0xAe6313dE2fDD754734074D8a6F4835c10827115b"  # Address 1
 USDC_POLYGON_QR_IMAGE = "usdc_polygon_qr.jpg"
 
-USDC_SOL_DEPOSIT_ADDRESS = "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy"
+# USDC Solana - Address 1 only (Address 2 = same as Address 1)
+USDC_SOL_DEPOSIT_ADDRESS = "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy"  # Address 1
 USDC_SOL_QR_IMAGE = "usdc_sol_qr.jpg"
 
 DEPOSIT_ADDRESSES = {
