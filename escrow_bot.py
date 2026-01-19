@@ -2187,27 +2187,36 @@ async def handle_callback(
         # Set the fixed address index (this will be used when network is selected)
         deal['fixed_address_index'] = address_index
         
-        # If network is already selected, also update the deposit_address immediately
+        # If network is already selected, also update the deposit_address and qr_image immediately
         if network:
             new_address = None
+            new_qr_image = None
             if currency == 'USDT':
                 if network == 'BSC' and address_index < len(BSC_DEPOSIT_ADDRESSES):
                     new_address = BSC_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = BSC_QR_IMAGES[address_index]
                 elif network == 'POLYGON' and address_index < len(POLYGON_DEPOSIT_ADDRESSES):
                     new_address = POLYGON_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = POLYGON_QR_IMAGES[address_index]
                 elif network == 'SOL' and address_index < len(SOL_DEPOSIT_ADDRESSES):
                     new_address = SOL_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = SOL_QR_IMAGES[address_index]
             elif currency == 'USDC':
                 if network == 'BSC' and address_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
                     new_address = USDC_BSC_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = USDC_BSC_QR_IMAGES[address_index]
                 elif network == 'POLYGON':
                     new_address = USDC_POLYGON_DEPOSIT_ADDRESS
+                    new_qr_image = USDC_POLYGON_QR_IMAGE
                 elif network == 'SOL':
                     new_address = USDC_SOL_DEPOSIT_ADDRESS
+                    new_qr_image = USDC_SOL_QR_IMAGE
 
             if new_address:
                 old_address = deal.get('deposit_address', 'Not set')
                 deal['deposit_address'] = new_address
+                if new_qr_image:
+                    deal['qr_image'] = new_qr_image
                 save_deals()
                 
                 await query.edit_message_text(
