@@ -70,9 +70,19 @@ GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
-BSC_QR_IMAGES = ["bsc_deposit_qr.jpg", "bsc_qr_2.jpg"]
-POLYGON_QR_IMAGES = ["polygon_deposit_qr.jpg", "polygon_qr_2.jpg"]
-SOL_QR_IMAGES = ["sol_deposit_qr.jpg", "sol_qr_2.jpg"]
+# QR Images for USDT addresses
+BSC_QR_IMAGES = [
+    "bsc_address1_qr.jpg",    # QR for Address 1
+    "bsc_address2_qr.jpg"     # QR for Address 2
+]
+POLYGON_QR_IMAGES = [
+    "polygon_address1_qr.jpg",  # QR for Address 1
+    "polygon_address2_qr.jpg"   # QR for Address 2
+]
+SOL_QR_IMAGES = [
+    "sol_address1_qr.jpg",    # QR for Address 1
+    "sol_address2_qr.jpg"     # QR for Address 2
+]
 
 # USDT Deposit Addresses
 BSC_DEPOSIT_ADDRESSES = [
@@ -91,7 +101,10 @@ SOL_DEPOSIT_ADDRESSES = [
 ]
 
 # USDC Deposit Addresses
-USDC_BSC_QR_IMAGES = ["usdc_bsc_qr.jpg", "usdc_bsc_qr_2.jpg"]
+USDC_BSC_QR_IMAGES = [
+    "usdc_bsc_address1_qr.jpg",  # QR for Address 1
+    "usdc_bsc_address2_qr.jpg"   # QR for Address 2
+]
 USDC_BSC_DEPOSIT_ADDRESSES = [
     "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
@@ -99,11 +112,11 @@ USDC_BSC_DEPOSIT_ADDRESSES = [
 
 # USDC Polygon - Address 1 only (Address 2 = same as Address 1)
 USDC_POLYGON_DEPOSIT_ADDRESS = "0xAe6313dE2fDD754734074D8a6F4835c10827115b"  # Address 1
-USDC_POLYGON_QR_IMAGE = "usdc_polygon_qr.jpg"
+USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
 
 # USDC Solana - Address 1 only (Address 2 = same as Address 1)
 USDC_SOL_DEPOSIT_ADDRESS = "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy"  # Address 1
-USDC_SOL_QR_IMAGE = "usdc_sol_qr.jpg"
+USDC_SOL_QR_IMAGE = "usdc_sol_address1_qr.jpg"  # QR for Address 1
 
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
