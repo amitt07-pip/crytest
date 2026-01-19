@@ -2129,6 +2129,83 @@ async def handle_callback(
             pass
         return
 
+    # Handle setaddy callback (admin setting specific address for a deal)
+    if data.startswith("setaddy_"):
+        user_id = query.from_user.id
+        if user_id not in ADMIN_USER_IDS:
+            await query.answer("Only admins can use this!")
+            return
+
+        parts = data.split("_")
+        if len(parts) < 3:
+            return
+
+        deal_id = parts[1]
+        action = parts[2]
+
+        if action == "cancel":
+            await query.edit_message_text(
+                "Address change cancelled.",
+                parse_mode="HTML"
+            )
+            return
+
+        if deal_id not in deals:
+            await query.edit_message_text(
+                f"Deal <code>{deal_id}</code> no longer exists.",
+                parse_mode="HTML"
+            )
+            return
+
+        deal = deals[deal_id]
+        network = deal.get('network', '')
+        currency = deal.get('currency', 'USDT')
+
+        # Determine which address to use based on selection
+        address_index = int(action) - 1  # 1 -> 0, 2 -> 1
+
+        # Get the appropriate address based on network and currency
+        new_address = None
+        if currency == 'USDT':
+            if network == 'BSC' and address_index < len(BSC_DEPOSIT_ADDRESSES):
+                new_address = BSC_DEPOSIT_ADDRESSES[address_index]
+            elif network == 'POLYGON' and address_index < len(POLYGON_DEPOSIT_ADDRESSES):
+                new_address = POLYGON_DEPOSIT_ADDRESSES[address_index]
+            elif network == 'SOL' and address_index < len(SOL_DEPOSIT_ADDRESSES):
+                new_address = SOL_DEPOSIT_ADDRESSES[address_index]
+        elif currency == 'USDC':
+            if network == 'BSC' and address_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
+                new_address = USDC_BSC_DEPOSIT_ADDRESSES[address_index]
+            elif network == 'POLYGON':
+                new_address = USDC_POLYGON_DEPOSIT_ADDRESS
+            elif network == 'SOL':
+                new_address = USDC_SOL_DEPOSIT_ADDRESS
+
+        if not new_address:
+            await query.edit_message_text(
+                f"Could not find Address {action} for {currency} on {network}.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Update the deal with the new address
+        old_address = deal.get('deposit_address', 'Not set')
+        deal['deposit_address'] = new_address
+        deal['fixed_address_index'] = address_index
+        save_deals()
+
+        await query.edit_message_text(
+            f"<b>Address Updated for Deal #{deal_id}</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>Currency:</b> {currency}\n"
+            f"<b>Network:</b> {network}\n\n"
+            f"<b>Old Address:</b>\n<code>{old_address}</code>\n\n"
+            f"<b>New Address (Address {action}):</b>\n<code>{new_address}</code>",
+            parse_mode="HTML"
+        )
+        log_info(f"Deal #{deal_id} address changed to Address {action} by admin {user_id}")
+        return
+
 
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
@@ -3126,6 +3203,80 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="HTML")
 
 
+async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set a specific address (Address 1 or Address 2) for a deal."""
+    # Only work in groups, not DMs
+    if update.effective_chat.type == "private":
+        return
+
+    user_id = update.effective_user.id
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b> <code>/setaddy [deal_id]</code>\n\n"
+            "Example: <code>/setaddy D1234</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    deal_id = context.args[0].upper()
+    if not deal_id.startswith("D"):
+        deal_id = f"D{deal_id}"
+
+    if deal_id not in deals:
+        await update.message.reply_text(
+            f"<b>Deal Not Found</b>\n\n"
+            f"Deal ID <code>{deal_id}</code> does not exist.",
+            parse_mode="HTML"
+        )
+        return
+
+    deal = deals[deal_id]
+    status = deal.get('status', 'unknown')
+
+    # Check if deal is active (not completed or cancelled)
+    inactive_statuses = ['completed', 'cancelled', 'released']
+    if status in inactive_statuses:
+        await update.message.reply_text(
+            f"<b>Deal Inactive</b>\n\n"
+            f"Deal <code>#{deal_id}</code> is already <b>{status}</b>.\n"
+            f"Cannot change address for inactive deals.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Get current deal info
+    network = deal.get('network', 'Unknown')
+    current_address = deal.get('deposit_address', 'Not set')
+    currency = deal.get('currency', 'USDT')
+
+    # Build address selection buttons
+    keyboard = [
+        [
+            InlineKeyboardButton("Address 1", callback_data=f"setaddy_{deal_id}_1"),
+            InlineKeyboardButton("Address 2", callback_data=f"setaddy_{deal_id}_2")
+        ],
+        [InlineKeyboardButton("Cancel", callback_data=f"setaddy_{deal_id}_cancel")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        f"<b>Set Address for Deal #{deal_id}</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>Status:</b> {status}\n"
+        f"<b>Currency:</b> {currency}\n"
+        f"<b>Network:</b> {network}\n"
+        f"<b>Current Address:</b>\n<code>{current_address}</code>\n\n"
+        f"Select which address to use for this deal:",
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     # Only work in groups, not DMs
@@ -3157,6 +3308,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += "/unban @username - Unban a user\n"
     msg += "/banned - List all banned users\n"
     msg += "/setup_rooms - Initialize room pool\n"
+    msg += "/setaddy [deal_id] - Set specific address for a deal\n"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -3199,6 +3351,7 @@ async def main():
     app.add_handler(CommandHandler("unban", unban_user))
     app.add_handler(CommandHandler("banned", list_banned))
     app.add_handler(CommandHandler("cmd", cmd_list))
+    app.add_handler(CommandHandler("setaddy", set_address))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
