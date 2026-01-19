@@ -602,37 +602,57 @@ def build_deposit_message(deal, deal_id):
     if deal.get('deposit_address'):
         deposit_address = deal['deposit_address']
         qr_image = deal.get('qr_image')
-    elif network == "BSC":
-        deposit_address, qr_image = get_bsc_deposit_info()
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
-    elif network == "POLYGON":
-        deposit_address, qr_image = get_polygon_deposit_info()
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
-    elif network == "SOL":
-        deposit_address, qr_image = get_sol_deposit_info()
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
-    elif network == "USDC_BSC":
-        deposit_address, qr_image = get_usdc_bsc_deposit_info()
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
-    elif network == "USDC_POLYGON":
-        deposit_address = USDC_POLYGON_DEPOSIT_ADDRESS
-        qr_image = USDC_POLYGON_QR_IMAGE
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
-    elif network == "USDC_SOL":
-        deposit_address = USDC_SOL_DEPOSIT_ADDRESS
-        qr_image = USDC_SOL_QR_IMAGE
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
     else:
-        deposit_address = DEPOSIT_ADDRESSES.get(network, '')
-        qr_image = None
-        deal['deposit_address'] = deposit_address
-        deal['qr_image'] = qr_image
+        # Check if admin has pre-fixed an address index
+        fixed_index = deal.get('fixed_address_index')
+        
+        if network == "BSC":
+            if fixed_index is not None and fixed_index < len(BSC_DEPOSIT_ADDRESSES):
+                deposit_address = BSC_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = BSC_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_bsc_deposit_info()
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        elif network == "POLYGON":
+            if fixed_index is not None and fixed_index < len(POLYGON_DEPOSIT_ADDRESSES):
+                deposit_address = POLYGON_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = POLYGON_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_polygon_deposit_info()
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        elif network == "SOL":
+            if fixed_index is not None and fixed_index < len(SOL_DEPOSIT_ADDRESSES):
+                deposit_address = SOL_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = SOL_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_sol_deposit_info()
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        elif network == "USDC_BSC":
+            if fixed_index is not None and fixed_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
+                deposit_address = USDC_BSC_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = USDC_BSC_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_usdc_bsc_deposit_info()
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        elif network == "USDC_POLYGON":
+            deposit_address = USDC_POLYGON_DEPOSIT_ADDRESS
+            qr_image = USDC_POLYGON_QR_IMAGE
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        elif network == "USDC_SOL":
+            deposit_address = USDC_SOL_DEPOSIT_ADDRESS
+            qr_image = USDC_SOL_QR_IMAGE
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
+        else:
+            deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+            qr_image = None
+            deal['deposit_address'] = deposit_address
+            deal['qr_image'] = qr_image
 
     msg = (
         f"Deal [#{deal_id}]\n"
@@ -2161,58 +2181,69 @@ async def handle_callback(
         network = deal.get('network')
         currency = deal.get('currency', 'USDT')
 
-        # Check if network has been selected
-        if not network:
-            await query.edit_message_text(
-                f"Deal <code>#{deal_id}</code> has no network selected yet.\n"
-                f"Cannot set address until network is selected.",
-                parse_mode="HTML"
-            )
-            return
-
-        # Determine which address to use based on selection
+        # Determine which address index to fix
         address_index = int(action) - 1  # 1 -> 0, 2 -> 1
 
-        # Get the appropriate address based on network and currency
-        new_address = None
-        if currency == 'USDT':
-            if network == 'BSC' and address_index < len(BSC_DEPOSIT_ADDRESSES):
-                new_address = BSC_DEPOSIT_ADDRESSES[address_index]
-            elif network == 'POLYGON' and address_index < len(POLYGON_DEPOSIT_ADDRESSES):
-                new_address = POLYGON_DEPOSIT_ADDRESSES[address_index]
-            elif network == 'SOL' and address_index < len(SOL_DEPOSIT_ADDRESSES):
-                new_address = SOL_DEPOSIT_ADDRESSES[address_index]
-        elif currency == 'USDC':
-            if network == 'BSC' and address_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
-                new_address = USDC_BSC_DEPOSIT_ADDRESSES[address_index]
-            elif network == 'POLYGON':
-                new_address = USDC_POLYGON_DEPOSIT_ADDRESS
-            elif network == 'SOL':
-                new_address = USDC_SOL_DEPOSIT_ADDRESS
+        # Set the fixed address index (this will be used when network is selected)
+        deal['fixed_address_index'] = address_index
+        
+        # If network is already selected, also update the deposit_address immediately
+        if network:
+            new_address = None
+            if currency == 'USDT':
+                if network == 'BSC' and address_index < len(BSC_DEPOSIT_ADDRESSES):
+                    new_address = BSC_DEPOSIT_ADDRESSES[address_index]
+                elif network == 'POLYGON' and address_index < len(POLYGON_DEPOSIT_ADDRESSES):
+                    new_address = POLYGON_DEPOSIT_ADDRESSES[address_index]
+                elif network == 'SOL' and address_index < len(SOL_DEPOSIT_ADDRESSES):
+                    new_address = SOL_DEPOSIT_ADDRESSES[address_index]
+            elif currency == 'USDC':
+                if network == 'BSC' and address_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
+                    new_address = USDC_BSC_DEPOSIT_ADDRESSES[address_index]
+                elif network == 'POLYGON':
+                    new_address = USDC_POLYGON_DEPOSIT_ADDRESS
+                elif network == 'SOL':
+                    new_address = USDC_SOL_DEPOSIT_ADDRESS
 
-        if not new_address:
+            if new_address:
+                old_address = deal.get('deposit_address', 'Not set')
+                deal['deposit_address'] = new_address
+                save_deals()
+                
+                await query.edit_message_text(
+                    f"<b>Address Fixed for Deal #{deal_id}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"<b>Currency:</b> {currency}\n"
+                    f"<b>Network:</b> {network}\n\n"
+                    f"<b>Old Address:</b>\n<code>{old_address}</code>\n\n"
+                    f"<b>New Address (Address {action}):</b>\n<code>{new_address}</code>",
+                    parse_mode="HTML"
+                )
+                log_info(f"Deal #{deal_id} address changed to Address {action} by admin {user_id}")
+            else:
+                save_deals()
+                await query.edit_message_text(
+                    f"<b>Address Index Fixed for Deal #{deal_id}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"<b>Fixed to:</b> Address {action}\n"
+                    f"<b>Currency:</b> {currency}\n"
+                    f"<b>Network:</b> {network}\n\n"
+                    f"<i>Note: Could not find Address {action} for this network.</i>",
+                    parse_mode="HTML"
+                )
+        else:
+            # Network not selected yet - just save the fixed index
+            save_deals()
             await query.edit_message_text(
-                f"Could not find Address {action} for {currency} on {network}.",
+                f"<b>Address Pre-Fixed for Deal #{deal_id}</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Fixed to:</b> Address {action}\n"
+                f"<b>Currency:</b> {currency}\n"
+                f"<b>Network:</b> Not selected yet\n\n"
+                f"<i>When the user selects a network, Address {action} will be used instead of rotating.</i>",
                 parse_mode="HTML"
             )
-            return
-
-        # Update the deal with the new address
-        old_address = deal.get('deposit_address', 'Not set')
-        deal['deposit_address'] = new_address
-        deal['fixed_address_index'] = address_index
-        save_deals()
-
-        await query.edit_message_text(
-            f"<b>Address Updated for Deal #{deal_id}</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"<b>Currency:</b> {currency}\n"
-            f"<b>Network:</b> {network}\n\n"
-            f"<b>Old Address:</b>\n<code>{old_address}</code>\n\n"
-            f"<b>New Address (Address {action}):</b>\n<code>{new_address}</code>",
-            parse_mode="HTML"
-        )
-        log_info(f"Deal #{deal_id} address changed to Address {action} by admin {user_id}")
+            log_info(f"Deal #{deal_id} pre-fixed to Address {action} by admin {user_id}")
         return
 
 
@@ -3262,16 +3293,10 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     network = deal.get('network')
     current_address = deal.get('deposit_address', 'Not set')
     currency = deal.get('currency', 'USDT')
+    fixed_index = deal.get('fixed_address_index')
 
-    # Check if network has been selected
-    if not network:
-        await update.message.reply_text(
-            f"<b>Network Not Selected</b>\n\n"
-            f"Deal <code>#{deal_id}</code> has not selected a network yet.\n"
-            f"Cannot set address until network is selected.",
-            parse_mode="HTML"
-        )
-        return
+    # Show current fixed address if set
+    fixed_status = f"Address {fixed_index + 1}" if fixed_index is not None else "Not fixed (rotating)"
 
     # Build address selection buttons
     keyboard = [
@@ -3283,14 +3308,18 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
+    network_display = network if network else "Not selected yet"
+    
     await update.message.reply_text(
         f"<b>Set Address for Deal #{deal_id}</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"<b>Status:</b> {status}\n"
         f"<b>Currency:</b> {currency}\n"
-        f"<b>Network:</b> {network}\n"
+        f"<b>Network:</b> {network_display}\n"
+        f"<b>Current Fixed:</b> {fixed_status}\n"
         f"<b>Current Address:</b>\n<code>{current_address}</code>\n\n"
-        f"Select which address to use for this deal:",
+        f"Select which address to fix for this deal:\n"
+        f"<i>(This will apply when network is selected)</i>",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
