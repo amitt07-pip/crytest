@@ -2158,8 +2158,17 @@ async def handle_callback(
             return
 
         deal = deals[deal_id]
-        network = deal.get('network', '')
+        network = deal.get('network')
         currency = deal.get('currency', 'USDT')
+
+        # Check if network has been selected
+        if not network:
+            await query.edit_message_text(
+                f"Deal <code>#{deal_id}</code> has no network selected yet.\n"
+                f"Cannot set address until network is selected.",
+                parse_mode="HTML"
+            )
+            return
 
         # Determine which address to use based on selection
         address_index = int(action) - 1  # 1 -> 0, 2 -> 1
@@ -3250,9 +3259,19 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Get current deal info
-    network = deal.get('network', 'Unknown')
+    network = deal.get('network')
     current_address = deal.get('deposit_address', 'Not set')
     currency = deal.get('currency', 'USDT')
+
+    # Check if network has been selected
+    if not network:
+        await update.message.reply_text(
+            f"<b>Network Not Selected</b>\n\n"
+            f"Deal <code>#{deal_id}</code> has not selected a network yet.\n"
+            f"Cannot set address until network is selected.",
+            parse_mode="HTML"
+        )
+        return
 
     # Build address selection buttons
     keyboard = [
