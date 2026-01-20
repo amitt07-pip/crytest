@@ -602,6 +602,25 @@ def build_deposit_message(deal, deal_id):
     if deal.get('deposit_address'):
         deposit_address = deal['deposit_address']
         qr_image = deal.get('qr_image')
+        
+        # If qr_image is missing, try to look it up based on the address
+        if not qr_image:
+            fixed_index = deal.get('fixed_address_index')
+            if fixed_index is not None:
+                if network == "BSC" and fixed_index < len(BSC_QR_IMAGES):
+                    qr_image = BSC_QR_IMAGES[fixed_index]
+                elif network == "POLYGON" and fixed_index < len(POLYGON_QR_IMAGES):
+                    qr_image = POLYGON_QR_IMAGES[fixed_index]
+                elif network == "SOL" and fixed_index < len(SOL_QR_IMAGES):
+                    qr_image = SOL_QR_IMAGES[fixed_index]
+                elif network == "USDC_BSC" and fixed_index < len(USDC_BSC_QR_IMAGES):
+                    qr_image = USDC_BSC_QR_IMAGES[fixed_index]
+                elif network == "USDC_POLYGON":
+                    qr_image = USDC_POLYGON_QR_IMAGE
+                elif network == "USDC_SOL":
+                    qr_image = USDC_SOL_QR_IMAGE
+                if qr_image:
+                    deal['qr_image'] = qr_image
     else:
         # Check if admin has pre-fixed an address index
         fixed_index = deal.get('fixed_address_index')
