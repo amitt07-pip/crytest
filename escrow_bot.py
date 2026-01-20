@@ -86,12 +86,12 @@ SOL_QR_IMAGES = [
 
 # USDT Deposit Addresses
 BSC_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 POLYGON_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
@@ -106,12 +106,12 @@ USDC_BSC_QR_IMAGES = [
     "usdc_bsc_address2_qr.jpg"   # QR for Address 2
 ]
 USDC_BSC_DEPOSIT_ADDRESSES = [
-    "0xAe6313dE2fDD754734074D8a6F4835c10827115b",  # Address 1
+    "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 # USDC Polygon - Address 1 only (Address 2 = same as Address 1)
-USDC_POLYGON_DEPOSIT_ADDRESS = "0xAe6313dE2fDD754734074D8a6F4835c10827115b"  # Address 1
+USDC_POLYGON_DEPOSIT_ADDRESS = "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7"  # Address 1
 USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
 
 # USDC Solana - Address 1 only (Address 2 = same as Address 1)
