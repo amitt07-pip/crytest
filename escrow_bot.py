@@ -1672,6 +1672,9 @@ async def handle_callback(
             save_deals()  # Save deposit_address immediately to prevent rotation issues
             network = deal.get('network', 'BSC')
 
+            # Debug logging for QR image
+            log_info(f"Deal #{deal_id} deposit: network={network}, qr_image={deal.get('qr_image')}, fixed_index={deal.get('fixed_address_index')}, deposit_address={deal.get('deposit_address')}")
+
             if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON', 'USDC_SOL']:
                 import os
                 qr_image = deal.get('qr_image')
@@ -1681,6 +1684,7 @@ async def handle_callback(
                         os.path.dirname(os.path.abspath(__file__)),
                         qr_image
                     )
+                    log_info(f"Deal #{deal_id} trying to send QR image: {qr_path}")
                     try:
                         with open(qr_path, 'rb') as qr_file:
                             sent_deposit = await context.bot.send_photo(
@@ -1690,8 +1694,11 @@ async def handle_callback(
                                 parse_mode="HTML",
                                 reply_markup=get_deposit_buttons(deal_id)
                             )
-                    except FileNotFoundError:
-                        pass
+                            log_info(f"Deal #{deal_id} QR image sent successfully")
+                    except FileNotFoundError as e:
+                        log_error(f"Deal #{deal_id} QR image not found: {qr_path}")
+                else:
+                    log_warning(f"Deal #{deal_id} no qr_image set in deal")
                 if sent_deposit is None:
                     sent_deposit = await context.bot.send_message(
                         chat_id=chat_id,
