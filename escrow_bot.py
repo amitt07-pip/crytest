@@ -2886,10 +2886,6 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display professional status of all rooms."""
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -2950,10 +2946,6 @@ async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Free all rooms and kick all members from them."""
     global userbot_client, deals, rooms
-
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
 
     user_id = update.effective_user.id
 
@@ -3053,10 +3045,6 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Delete all rooms from the database so they won't be used for escrow."""
     global rooms
 
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -3080,10 +3068,6 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create 20 new escrow rooms."""
     global userbot_client, rooms
-
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
 
     user_id = update.effective_user.id
 
@@ -3149,10 +3133,6 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ban a user from using bot commands."""
     global banned_users
 
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -3203,10 +3183,6 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Unban a user from using bot commands."""
     global banned_users
 
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -3250,10 +3226,6 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all banned users."""
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -3280,10 +3252,6 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set a specific address (Address 1 or Address 2) for a deal."""
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -3362,10 +3330,6 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
-    # Only work in groups, not DMs
-    if update.effective_chat.type == "private":
-        return
-
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
