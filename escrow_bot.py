@@ -96,7 +96,7 @@ POLYGON_DEPOSIT_ADDRESSES = [
 ]
 
 SOL_DEPOSIT_ADDRESSES = [
-    "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy",  # Address 1
+    "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5",  # Address 1
     "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"   # Address 2
 ]
 
@@ -115,7 +115,7 @@ USDC_POLYGON_DEPOSIT_ADDRESS = "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7"  # A
 USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
 
 # USDC Solana - Address 1 only (Address 2 = same as Address 1)
-USDC_SOL_DEPOSIT_ADDRESS = "8wb1YshTFu5r3f9bzmMxKXRL9Lijphif1MUfDmEptnFy"  # Address 1
+USDC_SOL_DEPOSIT_ADDRESS = "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"  # Address 1
 USDC_SOL_QR_IMAGE = "usdc_sol_address1_qr.jpg"  # QR for Address 1
 
 DEPOSIT_ADDRESSES = {
