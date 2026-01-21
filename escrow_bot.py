@@ -3224,6 +3224,111 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"User {display_name} unbanned by admin {user_id}")
 
 
+async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unban a user from all escrow groups so they can rejoin."""
+    global userbot_client
+
+    user_id = update.effective_user.id
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b>\n"
+            "<code>/gunban @username</code> - Unban by username\n"
+            "<code>/gunban 123456789</code> - Unban by user ID\n\n"
+            "<i>This unbans the user from all escrow rooms so they can rejoin.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    target = context.args[0]
+
+    if userbot_client is None:
+        await init_userbot()
+
+    # Get the target user ID
+    target_user_id = None
+    display_name = target
+
+    if target.isdigit():
+        target_user_id = int(target)
+        display_name = f"User ID: {target}"
+    else:
+        # Try to resolve username to user ID
+        username = target.lstrip('@')
+        display_name = f"@{username}"
+        try:
+            entity = await userbot_client.get_entity(username)
+            target_user_id = entity.id
+        except Exception as e:
+            await update.message.reply_text(
+                f"<b>User Not Found</b>\n\n"
+                f"Could not find user {display_name}.\n"
+                f"<i>Error: {str(e)}</i>",
+                parse_mode="HTML"
+            )
+            return
+
+    if not target_user_id:
+        await update.message.reply_text(
+            f"<b>Invalid User</b>\n\n"
+            f"Could not resolve {display_name} to a user ID.",
+            parse_mode="HTML"
+        )
+        return
+
+    await update.message.reply_text(f"Unbanning {display_name} from all escrow rooms...")
+
+    unbanned_count = 0
+    failed_count = 0
+
+    from telethon.tl.functions.channels import EditBannedRequest
+    from telethon.tl.types import ChatBannedRights
+
+    for room_num, room_data in rooms.items():
+        channel_id = room_data.get('channel_id')
+        if not channel_id:
+            continue
+
+        full_channel_id = f"-100{channel_id}"
+
+        try:
+            # Unban the user (remove all restrictions)
+            unban_rights = ChatBannedRights(
+                until_date=None,
+                view_messages=False,
+                send_messages=False,
+                send_media=False,
+                send_stickers=False,
+                send_gifs=False,
+                send_games=False,
+                send_inline=False,
+                embed_links=False
+            )
+            await userbot_client(EditBannedRequest(
+                channel=int(full_channel_id),
+                participant=target_user_id,
+                banned_rights=unban_rights
+            ))
+            unbanned_count += 1
+        except Exception as e:
+            failed_count += 1
+            log_warning(f"Could not unban user {target_user_id} from room {room_num}: {e}")
+
+    await update.message.reply_text(
+        f"<b>User Unbanned from Groups</b>\n\n"
+        f"<b>User:</b> {display_name}\n"
+        f"<b>Rooms unbanned:</b> {unbanned_count}\n"
+        f"<b>Failed:</b> {failed_count}\n\n"
+        f"<i>The user can now rejoin escrow rooms.</i>",
+        parse_mode="HTML"
+    )
+    log_info(f"User {display_name} unbanned from {unbanned_count} groups by admin {user_id}")
+
+
 async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """List all banned users."""
     user_id = update.effective_user.id
@@ -3352,7 +3457,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg += "/deleteall - Delete all rooms from database\n"
     msg += "/newrooms - Create 20 new escrow rooms\n"
     msg += "/ban @username - Ban a user from using the bot\n"
-    msg += "/unban @username - Unban a user\n"
+    msg += "/unban @username - Unban a user from bot commands\n"
+    msg += "/gunban @username - Unban a user from all escrow groups\n"
     msg += "/banned - List all banned users\n"
     msg += "/setup_rooms - Initialize room pool\n"
     msg += "/setaddy [deal_id] - Set specific address for a deal\n"
@@ -3396,6 +3502,7 @@ async def main():
     app.add_handler(CommandHandler("newrooms", create_new_rooms))
     app.add_handler(CommandHandler("ban", ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
+    app.add_handler(CommandHandler("gunban", group_unban_user))
     app.add_handler(CommandHandler("banned", list_banned))
     app.add_handler(CommandHandler("cmd", cmd_list))
     app.add_handler(CommandHandler("setaddy", set_address))
