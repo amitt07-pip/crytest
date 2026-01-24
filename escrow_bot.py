@@ -3096,7 +3096,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 complete_msg = (
                     f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
-                    f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
+                    f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
                     f"🕗 Completed in {duration_str}"
                 )
@@ -3113,7 +3113,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Deal cancelled - no deposit detected
                 cancel_msg = (
                     f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
-                    f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
+                    f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
                 )
                 try:
