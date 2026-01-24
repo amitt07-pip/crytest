@@ -59,10 +59,10 @@ from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
 from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights  # noqa: E402
 
 
-API_ID = os.environ.get("API_ID")
-API_HASH = os.environ.get("API_HASH")
-PHONE = os.environ.get("PHONE")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+API_ID = os.environ.get("TELEGRAM_API_ID")
+API_HASH = os.environ.get("TELEGRAM_API_HASH")
+PHONE = os.environ.get("TELEGRAM_PHONE")
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 
 ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
 ALLOWED_USERS_FILE = "allowed_users.json"
@@ -1537,7 +1537,7 @@ async def handle_callback(
             # Check if user has 2FA set
             if str(user_id) in user_2fa:
                 code = user_2fa[str(user_id)].get("code", "")
-                await query.answer(f"Your 2FA code: {code}", show_alert=True)
+                await query.answer(code, show_alert=True)
             else:
                 # No response if user hasn't set 2FA
                 await query.answer()
@@ -1591,12 +1591,6 @@ async def handle_callback(
                 if str(user_id) not in group_data[chat_id]["verified_2fa_users"]:
                     group_data[chat_id]["verified_2fa_users"].append(str(user_id))
                     save_group_data()
-                
-                # Check if both users have verified 2FA
-                if len(group_data[chat_id]["verified_2fa_users"]) >= 2:
-                    mentioned = group_data[chat_id]["mentioned_user"]
-                    sender = group_data[chat_id]["sender_user"]
-                    await send_form_messages(context, chat_id, mentioned, sender)
         return
 
     await query.answer()
@@ -2764,9 +2758,18 @@ async def handle_join_request(
                     group_data[chat_id]["joined_users"].append(username)
                     save_group_data()
 
+                    joined_count = len(group_data[chat_id]["joined_users"])
+                    mentioned = group_data[chat_id]["mentioned_user"]
+                    sender = group_data[chat_id]["sender_user"]
+
                     # Send 2FA welcome message for each user who joins
                     await asyncio.sleep(2)
                     await send_2fa_welcome_message(context, chat_id, username, user_id)
+
+                    # Send form messages when second user joins
+                    if joined_count == 2:
+                        await asyncio.sleep(1)
+                        await send_form_messages(context, chat_id, mentioned, sender)
         else:
             await join_request.decline()
     else:
