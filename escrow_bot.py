@@ -3476,9 +3476,9 @@ async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "<b>Usage:</b> <code>/set2fa [code]</code>\n\n"
-            "Example: <code>/set2fa mycode123</code>\n\n"
-            "<i>Code must be at least 6 characters.</i>",
+            "Please use correct format:\n"
+            "/set2fa <code>&lt;2FA_code&gt;</code>\n\n"
+            "Example: /set2fa MySecret123",
             parse_mode="HTML"
         )
         return
@@ -3487,9 +3487,7 @@ async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(code) < 6:
         await update.message.reply_text(
-            "<b>Invalid Code</b>\n\n"
-            "Your 2FA code must be at least 6 characters long.",
-            parse_mode="HTML"
+            "The provided 2FA code is too short. Please choose a code with at least 6 characters."
         )
         return
 
@@ -3502,9 +3500,14 @@ async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user_2fa()
 
     await update.message.reply_text(
-        "<b>2FA Code Set Successfully</b>\n\n"
-        f"Your 2FA code has been saved.",
-        parse_mode="HTML"
+        "✅ 2FA code has been set successfully.\n\n"
+        "🔐 Important Security Information:\n"
+        "• Always verify your 2FA code after joining the escrow room.\n"
+        "• 2FA setup happens ONLY once per user.\n"
+        "• The bot will NEVER ask you to set your 2FA again.\n"
+        "• Admins will NEVER ask for your 2FA code.\n\n"
+        "🚨 If any group or person asks you to re-set or share your 2FA code, it is a SCAM.\n"
+        "Keep your 2FA code private at all times."
     )
     log_info(f"User {user_id} (@{username}) set their 2FA code")
 
