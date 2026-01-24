@@ -2205,6 +2205,14 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
+        # Store completion info in group_data before deleting deal
+        import time as time_module
+        full_channel_id = str(query.message.chat_id)
+        if full_channel_id in group_data:
+            group_data[full_channel_id]["deal_completed"] = True
+            group_data[full_channel_id]["deal_release_time"] = time_module.time()
+            save_group_data()
+
         del deals[deal_id]
         save_deals()
 
@@ -2593,6 +2601,7 @@ async def handle_message(
         if room_num is None:
             room_num = "N/A"
 
+        import time as time_module
         deals[deal_id] = {
             'chat_id': chat_id,
             'seller': form_data['seller'],
@@ -2610,9 +2619,16 @@ async def handle_message(
             'seller_address_msg_id': None,
             'room_number': room_num,
             'mentioned_user': form_data['buyer'],
-            'sender_user': form_data['seller']
+            'sender_user': form_data['seller'],
+            'form_submitted_at': time_module.time()
         }
         save_deals()
+
+        # Store form submission time in group_data for duration calculation
+        full_channel_id = str(chat_id)
+        if full_channel_id in group_data:
+            group_data[full_channel_id]["deal_start_time"] = time_module.time()
+            save_group_data()
 
         seller = form_data['seller']
         buyer = form_data['buyer']
@@ -2994,6 +3010,11 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     room_num = get_room_by_channel_id(chat_id)
 
+    # Check if deal was completed (payment released)
+    deal_completed = False
+    if full_channel_id in group_data:
+        deal_completed = group_data[full_channel_id].get("deal_completed", False)
+
     # Check if deposit was detected (deal exists with deposit status)
     deposit_detected = False
     for deal_id, deal in deals.items():
@@ -3002,8 +3023,8 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 deposit_detected = True
                 break
 
-    # Edit original escrow message if no deposit detected
-    if not deposit_detected and full_channel_id in group_data:
+    # Edit original escrow message based on deal status
+    if full_channel_id in group_data:
         gdata = group_data[full_channel_id]
         escrow_msg_id = gdata.get("escrow_message_id")
         escrow_chat_id = gdata.get("escrow_chat_id")
@@ -3033,20 +3054,55 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
 
         if escrow_msg_id and escrow_chat_id:
-            cancel_msg = (
-                f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
-                f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
-                f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
-            )
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=escrow_chat_id,
-                    message_id=escrow_msg_id,
-                    text=cancel_msg,
-                    parse_mode="HTML"
+            if deal_completed:
+                # Calculate duration from form submission to release
+                import time as time_module
+                start_time = gdata.get("deal_start_time", 0)
+                release_time = gdata.get("deal_release_time", time_module.time())
+                duration_seconds = int(release_time - start_time)
+                
+                hours = duration_seconds // 3600
+                minutes = (duration_seconds % 3600) // 60
+                seconds = duration_seconds % 60
+                
+                if hours > 0:
+                    duration_str = f"{hours}h {minutes}m {seconds}s"
+                elif minutes > 0:
+                    duration_str = f"{minutes}m {seconds}s"
+                else:
+                    duration_str = f"{seconds}s"
+                
+                complete_msg = (
+                    f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
+                    f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
+                    f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
+                    f"🕗 Completed in {duration_str}"
                 )
-            except Exception as e:
-                log_warning(f"Could not edit escrow message: {e}")
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=escrow_chat_id,
+                        message_id=escrow_msg_id,
+                        text=complete_msg,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    log_warning(f"Could not edit escrow message: {e}")
+            elif not deposit_detected:
+                # Deal cancelled - no deposit detected
+                cancel_msg = (
+                    f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
+                    f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
+                    f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
+                )
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=escrow_chat_id,
+                        message_id=escrow_msg_id,
+                        text=cancel_msg,
+                        parse_mode="HTML"
+                    )
+                except Exception as e:
+                    log_warning(f"Could not edit escrow message: {e}")
 
     for deal_id, deal in list(deals.items()):
         if deal.get('channel_id') == chat_id:
