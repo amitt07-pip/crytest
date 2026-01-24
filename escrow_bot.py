@@ -2612,9 +2612,19 @@ async def handle_join_request(
                     group_data[chat_id]["joined_users"].append(username)
                     save_group_data()
 
-                    if len(group_data[chat_id]["joined_users"]) == 2:
-                        mentioned = group_data[chat_id]["mentioned_user"]
-                        sender = group_data[chat_id]["sender_user"]
+                    joined_count = len(group_data[chat_id]["joined_users"])
+                    mentioned = group_data[chat_id]["mentioned_user"]
+                    sender = group_data[chat_id]["sender_user"]
+
+                    if joined_count == 1:
+                        await asyncio.sleep(2)
+                        msg1 = (
+                            f"Hii {mentioned}, Welcome to the Escrow Group!\n\n"
+                            f"Please use /clean to free the group after the deal is completed."
+                        )
+                        await context.bot.send_message(chat_id=int(chat_id), text=msg1)
+
+                    elif joined_count == 2:
                         await asyncio.sleep(2)
                         await send_welcome_messages(
                             context, chat_id, mentioned, sender
