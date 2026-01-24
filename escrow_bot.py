@@ -3627,7 +3627,11 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Set 2FA code for a user. Available to all members."""
+    """Set 2FA code for a user. Only works in private chats."""
+    # Ignore if not in private chat
+    if update.effective_chat.type != "private":
+        return
+
     user = update.effective_user
     user_id = user.id
     username = user.username or ""
