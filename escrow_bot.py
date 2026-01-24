@@ -1517,13 +1517,89 @@ def get_form_keyboard(current_currency="USDT"):
 async def handle_callback(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    global deals
+    global deals, group_data
 
     query = update.callback_query
-    await query.answer()
     data = query.data
     user = query.from_user
+    user_id = user.id
     username = user.username.lower() if user.username else None
+
+    # Handle 2FA check callback - show user's 2FA code as popup
+    if data.startswith("check2fa_"):
+        parts = data.split("_")
+        if len(parts) >= 3:
+            target_user_id = parts[2]
+            # Only the user who the button is for can check their 2FA
+            if str(user_id) != target_user_id:
+                await query.answer()
+                return
+            # Check if user has 2FA set
+            if str(user_id) in user_2fa:
+                code = user_2fa[str(user_id)].get("code", "")
+                await query.answer(f"Your 2FA code: {code}", show_alert=True)
+            else:
+                # No response if user hasn't set 2FA
+                await query.answer()
+        return
+
+    # Handle 2FA verification callback - grant message permission
+    if data.startswith("verify2fa_"):
+        parts = data.split("_")
+        if len(parts) >= 3:
+            chat_id = parts[1]
+            target_user_id = parts[2]
+            # Only the user who the button is for can verify
+            if str(user_id) != target_user_id:
+                await query.answer("This button is not for you!")
+                return
+            
+            await query.answer()
+            
+            # Grant message permission to the user using userbot
+            try:
+                # Convert chat_id to proper format for Telethon
+                channel_id = int(chat_id)
+                if channel_id < 0:
+                    channel_id = int(str(channel_id).replace("-100", ""))
+                
+                # Grant send message permission
+                unban_rights = ChatBannedRights(
+                    until_date=None,
+                    view_messages=False,
+                    send_messages=False,
+                    send_media=False,
+                    send_stickers=False,
+                    send_gifs=False,
+                    send_games=False,
+                    send_inline=False,
+                    embed_links=False
+                )
+                await userbot_client(EditBannedRequest(
+                    channel=channel_id,
+                    participant=user_id,
+                    banned_rights=unban_rights
+                ))
+                log_info(f"User {user_id} (@{username}) verified 2FA and granted message permission in {chat_id}")
+            except Exception as e:
+                log_error(f"Failed to grant message permission: {e}")
+            
+            # Track 2FA verification in group_data
+            if chat_id in group_data:
+                if "verified_2fa_users" not in group_data[chat_id]:
+                    group_data[chat_id]["verified_2fa_users"] = []
+                if str(user_id) not in group_data[chat_id]["verified_2fa_users"]:
+                    group_data[chat_id]["verified_2fa_users"].append(str(user_id))
+                    save_group_data()
+                
+                # Check if both users have verified 2FA
+                if len(group_data[chat_id]["verified_2fa_users"]) >= 2:
+                    mentioned = group_data[chat_id]["mentioned_user"]
+                    sender = group_data[chat_id]["sender_user"]
+                    await send_form_messages(context, chat_id, mentioned, sender)
+        return
+
+    await query.answer()
 
     if data == "switch_to_usdc":
         new_text = get_form_text("USDC")
@@ -2559,6 +2635,54 @@ async def handle_message(
         )
 
 
+async def send_2fa_welcome_message(context, chat_id, username, user_id):
+    """Send 2FA verification welcome message to a user."""
+    msg = (
+        f"Hii @{username}, Welcome to the @CryptoIndiaUnited Escrow Group!\n\n"
+        f"Please <b>check & verify your 2FA</b> code by clicking the button below "
+        f"before proceeding with the deal.\n\n"
+        f"You will be able to send messages once your 2FA is verified."
+    )
+    keyboard = [
+        [InlineKeyboardButton("Check 2FA", callback_data=f"check2fa_{chat_id}_{user_id}")],
+        [InlineKeyboardButton("I've checked & verified my 2FA", callback_data=f"verify2fa_{chat_id}_{user_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await context.bot.send_message(
+        chat_id=int(chat_id),
+        text=msg,
+        parse_mode="HTML",
+        reply_markup=reply_markup
+    )
+
+
+async def send_form_messages(context, chat_id, mentioned_user, sender_user):
+    """Send the deal form messages after both users have verified 2FA."""
+    msg2 = (
+        f"{mentioned_user} {sender_user}\n"
+        f"One of you need to fill the form given below to start the deal!\n\n"
+        f"Use /exampleform to check out a filled example to guide you.\n\n"
+        f"<b><u>Note</u></b>:- While specifying Amount[USDT/USDC] "
+        f"<b>include</b> Escrow Fees in it. "
+        f"Escrow fees will be deducted before releasing the amount "
+        f"to the buyer."
+    )
+    await context.bot.send_message(
+        chat_id=int(chat_id),
+        text=msg2,
+        parse_mode="HTML"
+    )
+
+    form_text = get_form_text("USDT")
+    keyboard = get_form_keyboard("USDT")
+    await context.bot.send_message(
+        chat_id=int(chat_id),
+        text=form_text,
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+
 async def send_welcome_messages(context, chat_id, mentioned_user, sender_user):
     msg1 = (
         f"Hii {mentioned_user}, Welcome to the Escrow Group!\n\n"
@@ -2599,6 +2723,7 @@ async def handle_join_request(
     join_request: ChatJoinRequest = update.chat_join_request
     chat_id = str(join_request.chat.id)
     user = join_request.from_user
+    user_id = user.id
     username = user.username.lower() if user.username else None
 
     if chat_id in allowed_users:
@@ -2607,28 +2732,41 @@ async def handle_join_request(
             await join_request.approve()
             log_info(f"Join approved: @{username}")
 
+            # Restrict user's message permission after they join
+            await asyncio.sleep(1)
+            try:
+                channel_id = int(chat_id)
+                if channel_id < 0:
+                    channel_id = int(str(channel_id).replace("-100", ""))
+                
+                restrict_rights = ChatBannedRights(
+                    until_date=None,
+                    view_messages=False,
+                    send_messages=True,
+                    send_media=True,
+                    send_stickers=True,
+                    send_gifs=True,
+                    send_games=True,
+                    send_inline=True,
+                    embed_links=True
+                )
+                await userbot_client(EditBannedRequest(
+                    channel=channel_id,
+                    participant=user_id,
+                    banned_rights=restrict_rights
+                ))
+                log_info(f"User {user_id} (@{username}) restricted from sending messages until 2FA verification")
+            except Exception as e:
+                log_error(f"Failed to restrict user {user_id}: {e}")
+
             if chat_id in group_data:
                 if username not in group_data[chat_id]["joined_users"]:
                     group_data[chat_id]["joined_users"].append(username)
                     save_group_data()
 
-                    joined_count = len(group_data[chat_id]["joined_users"])
-                    mentioned = group_data[chat_id]["mentioned_user"]
-                    sender = group_data[chat_id]["sender_user"]
-
-                    if joined_count == 1:
-                        await asyncio.sleep(2)
-                        msg1 = (
-                            f"Hii {mentioned}, Welcome to the Escrow Group!\n\n"
-                            f"Please use /clean to free the group after the deal is completed."
-                        )
-                        await context.bot.send_message(chat_id=int(chat_id), text=msg1)
-
-                    elif joined_count == 2:
-                        await asyncio.sleep(2)
-                        await send_welcome_messages(
-                            context, chat_id, mentioned, sender
-                        )
+                    # Send 2FA welcome message for each user who joins
+                    await asyncio.sleep(2)
+                    await send_2fa_welcome_message(context, chat_id, username, user_id)
         else:
             await join_request.decline()
     else:
