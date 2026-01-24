@@ -70,6 +70,7 @@ GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
+USER_2FA_FILE = "user_2fa.json"
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
@@ -173,6 +174,7 @@ group_data = {}
 deals = {}
 rooms = {}
 banned_users = {}
+user_2fa = {}
 
 
 def load_allowed_users():
@@ -243,6 +245,20 @@ def load_banned_users():
 def save_banned_users():
     with open(BANNED_USERS_FILE, "w") as f:
         json.dump(banned_users, f)
+
+
+def load_user_2fa():
+    global user_2fa
+    try:
+        with open(USER_2FA_FILE, "r") as f:
+            user_2fa = json.load(f)
+    except FileNotFoundError:
+        user_2fa = {}
+
+
+def save_user_2fa():
+    with open(USER_2FA_FILE, "w") as f:
+        json.dump(user_2fa, f)
 
 
 def is_user_banned(user_id, username):
@@ -3452,6 +3468,47 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Set 2FA code for a user. Available to all members."""
+    user = update.effective_user
+    user_id = user.id
+    username = user.username or ""
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>Usage:</b> <code>/set2fa [code]</code>\n\n"
+            "Example: <code>/set2fa mycode123</code>\n\n"
+            "<i>Code must be at least 6 characters.</i>",
+            parse_mode="HTML"
+        )
+        return
+
+    code = context.args[0]
+
+    if len(code) < 6:
+        await update.message.reply_text(
+            "<b>Invalid Code</b>\n\n"
+            "Your 2FA code must be at least 6 characters long.",
+            parse_mode="HTML"
+        )
+        return
+
+    user_2fa[str(user_id)] = {
+        "user_id": user_id,
+        "username": username,
+        "code": code,
+        "set_at": datetime.now().isoformat()
+    }
+    save_user_2fa()
+
+    await update.message.reply_text(
+        "<b>2FA Code Set Successfully</b>\n\n"
+        f"Your 2FA code has been saved.",
+        parse_mode="HTML"
+    )
+    log_info(f"User {user_id} (@{username}) set their 2FA code")
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -3491,6 +3548,7 @@ async def main():
     load_deals()
     load_rooms()
     load_banned_users()
+    load_user_2fa()
     log_info("Database initialized")
 
     # Log room status
@@ -3525,6 +3583,7 @@ async def main():
     app.add_handler(CommandHandler("banned", list_banned))
     app.add_handler(CommandHandler("cmd", cmd_list))
     app.add_handler(CommandHandler("setaddy", set_address))
+    app.add_handler(CommandHandler("set2fa", set_2fa))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
