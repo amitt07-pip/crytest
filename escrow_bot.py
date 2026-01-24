@@ -59,10 +59,10 @@ from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
 from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights  # noqa: E402
 
 
-API_ID = os.environ.get("TELEGRAM_API_ID")
-API_HASH = os.environ.get("TELEGRAM_API_HASH")
-PHONE = os.environ.get("TELEGRAM_PHONE")
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+API_ID = os.environ.get("API_ID")
+API_HASH = os.environ.get("API_HASH")
+PHONE = os.environ.get("PHONE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
 ALLOWED_USERS_FILE = "allowed_users.json"
