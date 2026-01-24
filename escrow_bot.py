@@ -2894,13 +2894,19 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"List of Escrow Addresses</a>."
     )
 
-    await context.bot.send_message(
+    sent_msg = await context.bot.send_message(
         chat_id=chat_id,
         text=message,
         parse_mode="HTML",
         disable_web_page_preview=True,
         reply_to_message_id=update.message.message_id
     )
+
+    # Store the escrow message info for editing on /clean
+    group_data[full_channel_id]["escrow_message_id"] = sent_msg.message_id
+    group_data[full_channel_id]["escrow_chat_id"] = chat_id
+    group_data[full_channel_id]["sender_user_id"] = user_id
+    save_group_data()
 
 
 async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2978,14 +2984,69 @@ async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove all members from the group and mark deal as completed."""
-    global userbot_client, deals, rooms
+    global userbot_client, deals, rooms, group_data
 
     chat_id = update.effective_chat.id
+    full_channel_id = str(chat_id)
 
     if userbot_client is None:
         await init_userbot()
 
     room_num = get_room_by_channel_id(chat_id)
+
+    # Check if deposit was detected (deal exists with deposit status)
+    deposit_detected = False
+    for deal_id, deal in deals.items():
+        if deal.get('channel_id') == chat_id:
+            if deal.get('status') in ['deposit_pending', 'deposit_confirmed', 'completed']:
+                deposit_detected = True
+                break
+
+    # Edit original escrow message if no deposit detected
+    if not deposit_detected and full_channel_id in group_data:
+        gdata = group_data[full_channel_id]
+        escrow_msg_id = gdata.get("escrow_message_id")
+        escrow_chat_id = gdata.get("escrow_chat_id")
+        mentioned_user = gdata.get("mentioned_user", "")
+        sender_user = gdata.get("sender_user", "")
+        sender_user_id = gdata.get("sender_user_id", "")
+        room_number = gdata.get("room_number", room_num or "")
+
+        # Get mentioned user's ID from participants if possible
+        mentioned_user_id = ""
+        try:
+            mentioned_clean = mentioned_user.lstrip("@").lower()
+            from telethon.tl.functions.channels import GetParticipantsRequest
+            from telethon.tl.types import ChannelParticipantsRecent
+            participants = await userbot_client(GetParticipantsRequest(
+                channel=chat_id,
+                filter=ChannelParticipantsRecent(),
+                offset=0,
+                limit=100,
+                hash=0
+            ))
+            for user in participants.users:
+                if user.username and user.username.lower() == mentioned_clean:
+                    mentioned_user_id = user.id
+                    break
+        except Exception:
+            pass
+
+        if escrow_msg_id and escrow_chat_id:
+            cancel_msg = (
+                f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
+                f"{mentioned_user} {mentioned_user_id} & {sender_user} {sender_user_id} "
+                f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
+            )
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=escrow_chat_id,
+                    message_id=escrow_msg_id,
+                    text=cancel_msg,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                log_warning(f"Could not edit escrow message: {e}")
 
     for deal_id, deal in list(deals.items()):
         if deal.get('channel_id') == chat_id:
