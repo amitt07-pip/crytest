@@ -135,7 +135,7 @@ usdc_bsc_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
 
-DEAL_LOG_CHANNEL_ID = -1003521524337
+DEAL_LOG_CHANNEL_ID = -1003450478165
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
@@ -2926,7 +2926,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin command to create all 20 escrow rooms."""
+    """Admin command to create all 20 escrow rooms. Also checks for deleted groups and recreates them."""
+    global userbot_client
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
@@ -2937,18 +2938,39 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    if userbot_client is None:
+        await init_userbot()
+
     await context.bot.send_message(
         chat_id=chat_id,
-        text="🔄 Creating 20 escrow rooms... This may take a few minutes."
+        text="🔄 Checking existing rooms and creating missing ones... This may take a few minutes."
     )
 
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
 
     created_count = 0
+    recreated_count = 0
     for room_number in range(1, 21):
-        if str(room_number) in rooms:
-            continue
+        room_key = str(room_number)
+        
+        # Check if room exists in our records
+        if room_key in rooms:
+            # Verify the group still exists by trying to access it
+            room_data = rooms[room_key]
+            channel_id = room_data.get('channel_id')
+            if channel_id:
+                try:
+                    full_channel_id = int(f"-100{channel_id}")
+                    await userbot_client.get_entity(full_channel_id)
+                    # Group exists, skip
+                    continue
+                except Exception as e:
+                    # Group doesn't exist or can't be accessed, need to recreate
+                    log_warning(f"Room {room_number} group not accessible, recreating: {e}")
+                    del rooms[room_key]
+                    save_rooms()
+                    recreated_count += 1
 
         try:
             invite_link, room_num, channel_id = await create_escrow_group(
@@ -2980,7 +3002,7 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"✅ Setup complete! Created {created_count} new rooms. "
+        text=f"✅ Setup complete! Created {created_count} new rooms (recreated {recreated_count} deleted rooms). "
              f"Total rooms: {len(rooms)}"
     )
 
