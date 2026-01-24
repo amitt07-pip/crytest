@@ -3151,6 +3151,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
             for user in participants.users:
                 if user.id not in protected_ids:
                     try:
+                        # First kick the user by banning them
                         ban_rights = ChatBannedRights(
                             until_date=None,
                             view_messages=True
@@ -3160,6 +3161,17 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             participant=user.id,
                             banned_rights=ban_rights
                         ))
+                        kicked_count += 1
+                    except Exception as kick_error:
+                        log_warning(f"Could not kick user {user.id}: {kick_error}")
+            
+            # Wait a moment before unbanning all kicked users
+            await asyncio.sleep(1)
+            
+            # Now unban all kicked users so they can rejoin later
+            for user in participants.users:
+                if user.id not in protected_ids:
+                    try:
                         unban_rights = ChatBannedRights(
                             until_date=None,
                             view_messages=False,
@@ -3176,9 +3188,8 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             participant=user.id,
                             banned_rights=unban_rights
                         ))
-                        kicked_count += 1
-                    except Exception as kick_error:
-                        log_warning(f"Could not kick user {user.id}: {kick_error}")
+                    except Exception as unban_error:
+                        log_warning(f"Could not unban user {user.id}: {unban_error}")
         except Exception as get_error:
             log_warning(f"Could not get participants: {get_error}")
 
