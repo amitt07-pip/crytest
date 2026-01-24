@@ -1554,6 +1554,13 @@ async def handle_callback(
                 await query.answer("This button is not for you!")
                 return
             
+            # Check if user has already verified - if so, ignore the button
+            if chat_id in group_data:
+                if "verified_2fa_users" in group_data[chat_id]:
+                    if str(user_id) in group_data[chat_id]["verified_2fa_users"]:
+                        await query.answer()
+                        return
+            
             await query.answer()
             
             # Grant message permission to the user using userbot
