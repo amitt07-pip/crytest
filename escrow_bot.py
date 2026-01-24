@@ -2779,11 +2779,21 @@ async def handle_join_request(
             if chat_id in group_data:
                 if username not in group_data[chat_id]["joined_users"]:
                     group_data[chat_id]["joined_users"].append(username)
+                    
+                    # Store user ID based on whether they are the mentioned user or sender
+                    mentioned = group_data[chat_id]["mentioned_user"]
+                    sender = group_data[chat_id]["sender_user"]
+                    mentioned_clean = mentioned.lstrip("@").lower()
+                    sender_clean = sender.lstrip("@").lower()
+                    
+                    if username == mentioned_clean:
+                        group_data[chat_id]["mentioned_user_id"] = user_id
+                    elif username == sender_clean:
+                        group_data[chat_id]["sender_user_id"] = user_id
+                    
                     save_group_data()
 
                     joined_count = len(group_data[chat_id]["joined_users"])
-                    mentioned = group_data[chat_id]["mentioned_user"]
-                    sender = group_data[chat_id]["sender_user"]
 
                     # Send 2FA welcome message for each user who joins
                     await asyncio.sleep(2)
@@ -3053,27 +3063,8 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_user = gdata.get("mentioned_user", "")
         sender_user = gdata.get("sender_user", "")
         sender_user_id = gdata.get("sender_user_id", "")
+        mentioned_user_id = gdata.get("mentioned_user_id", "")
         room_number = gdata.get("room_number", room_num or "")
-
-        # Get mentioned user's ID from participants if possible
-        mentioned_user_id = ""
-        try:
-            mentioned_clean = mentioned_user.lstrip("@").lower()
-            from telethon.tl.functions.channels import GetParticipantsRequest
-            from telethon.tl.types import ChannelParticipantsRecent
-            participants = await userbot_client(GetParticipantsRequest(
-                channel=chat_id,
-                filter=ChannelParticipantsRecent(),
-                offset=0,
-                limit=100,
-                hash=0
-            ))
-            for user in participants.users:
-                if user.username and user.username.lower() == mentioned_clean:
-                    mentioned_user_id = user.id
-                    break
-        except Exception:
-            pass
 
         if escrow_msg_id and escrow_chat_id:
             if deal_completed:
