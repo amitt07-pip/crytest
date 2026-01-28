@@ -3699,8 +3699,10 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
+            "<b>⚙️ ADDRESS CONFIGURATION</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>Usage:</b> <code>/setaddy [deal_id]</code>\n\n"
-            "Example: <code>/setaddy D1234</code>",
+            "<b>Example:</b> <code>/setaddy D1234</code>",
             parse_mode="HTML"
         )
         return
@@ -3711,7 +3713,9 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if deal_id not in deals:
         await update.message.reply_text(
-            f"<b>Deal Not Found</b>\n\n"
+            f"<b>⚙️ ADDRESS CONFIGURATION</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>❌ Deal Not Found</b>\n\n"
             f"Deal ID <code>{deal_id}</code> does not exist.",
             parse_mode="HTML"
         )
@@ -3724,9 +3728,11 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     inactive_statuses = ['completed', 'cancelled', 'released']
     if status in inactive_statuses:
         await update.message.reply_text(
-            f"<b>Deal Inactive</b>\n\n"
-            f"Deal <code>#{deal_id}</code> is already <b>{status}</b>.\n"
-            f"Cannot change address for inactive deals.",
+            f"<b>⚙️ ADDRESS CONFIGURATION</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>⚠️ Deal Inactive</b>\n\n"
+            f"Deal <code>{deal_id}</code> is already <b>{status.capitalize()}</b>.\n"
+            f"Cannot modify address for inactive deals.",
             parse_mode="HTML"
         )
         return
@@ -3740,28 +3746,30 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Show current fixed address if set
     fixed_status = f"Address {fixed_index + 1}" if fixed_index is not None else "Not fixed (rotating)"
 
-    # Build address selection buttons
+    # Build address selection buttons with professional styling
     keyboard = [
         [
-            InlineKeyboardButton("Address 1", callback_data=f"setaddy_{deal_id}_1"),
-            InlineKeyboardButton("Address 2", callback_data=f"setaddy_{deal_id}_2")
+            InlineKeyboardButton("📍 Address 1", callback_data=f"setaddy_{deal_id}_1"),
+            InlineKeyboardButton("📍 Address 2", callback_data=f"setaddy_{deal_id}_2")
         ],
-        [InlineKeyboardButton("Cancel", callback_data=f"setaddy_{deal_id}_cancel")]
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"setaddy_{deal_id}_cancel")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
-    network_display = network if network else "Not selected yet"
+    network_display = network.upper() if network else "Pending Selection"
+    status_emoji = "🟢" if status == "active" else "🟡" if status == "pending" else "⚪"
     
     await update.message.reply_text(
-        f"<b>Set Address for Deal #{deal_id}</b>\n"
+        f"<b>⚙️ ADDRESS CONFIGURATION</b>\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>Status:</b> {status}\n"
-        f"<b>Currency:</b> {currency}\n"
-        f"<b>Network:</b> {network_display}\n"
-        f"<b>Current Fixed:</b> {fixed_status}\n"
-        f"<b>Current Address:</b>\n<code>{current_address}</code>\n\n"
-        f"Select which address to fix for this deal:\n"
-        f"<i>(This will apply when network is selected)</i>",
+        f"<b>📋 Deal ID:</b> <code>{deal_id}</code>\n"
+        f"<b>{status_emoji} Status:</b> {status.capitalize()}\n"
+        f"<b>💰 Currency:</b> {currency}\n"
+        f"<b>🌐 Network:</b> {network_display}\n\n"
+        f"<b>📌 Current Configuration:</b>\n"
+        f"├ Fixed Address: <b>{fixed_status}</b>\n"
+        f"└ Deposit Address:\n<code>{current_address}</code>\n\n"
+        f"<b>Select deposit address:</b>",
         parse_mode="HTML",
         reply_markup=reply_markup
     )
