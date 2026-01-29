@@ -3006,10 +3006,6 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
     if user_id not in ADMIN_USER_IDS:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text="❌ Only admins can use this command."
-        )
         return
 
     if userbot_client is None:
@@ -3017,7 +3013,13 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text="🔄 Checking existing rooms and creating missing ones... This may take a few minutes."
+        text=(
+            "<b>🔧 SETUP ROOMS</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔄 Checking existing rooms and creating missing ones...\n\n"
+            "<i>This may take a few minutes.</i>"
+        ),
+        parse_mode="HTML"
     )
 
     bot_info = await context.bot.get_me()
@@ -3076,8 +3078,16 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=f"✅ Setup complete! Created {created_count} new rooms (recreated {recreated_count} deleted rooms). "
-             f"Total rooms: {len(rooms)}"
+        text=(
+            f"<b>🔧 SETUP ROOMS</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>✅ Setup Complete</b>\n\n"
+            f"<b>📊 Results:</b>\n"
+            f"├ 🆕 New Rooms Created: <b>{created_count}</b>\n"
+            f"├ 🔄 Rooms Recreated: <b>{recreated_count}</b>\n"
+            f"└ 📋 Total Rooms: <b>{len(rooms)}</b>"
+        ),
+        parse_mode="HTML"
     )
 
 
@@ -3248,7 +3258,13 @@ async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not rooms:
-        await update.message.reply_text("No rooms configured yet. Use /setup_rooms to create rooms.")
+        await update.message.reply_text(
+            "<b>🏠 ROOM STATUS</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❌ No rooms configured yet.\n\n"
+            "Use /setup_rooms to create rooms.",
+            parse_mode="HTML"
+        )
         return
 
     total_rooms = len(rooms)
@@ -3256,13 +3272,14 @@ async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     busy_rooms = total_rooms - free_rooms
 
     header = (
-        "<b>ESCROW ROOMS STATUS</b>\n"
+        "<b>🏠 ESCROW ROOMS STATUS</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>Total Rooms:</b> {total_rooms}\n"
-        f"<b>Available:</b> {free_rooms}\n"
-        f"<b>In Use:</b> {busy_rooms}\n\n"
+        f"<b>📊 Overview:</b>\n"
+        f"├ Total Rooms: <b>{total_rooms}</b>\n"
+        f"├ 🟢 Available: <b>{free_rooms}</b>\n"
+        f"└ 🔴 In Use: <b>{busy_rooms}</b>\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "<b>ROOM DETAILS</b>\n"
+        "<b>📋 ROOM DETAILS</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
     )
 
@@ -3279,17 +3296,17 @@ async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
             sender = room_data.get('sender_user', 'N/A')
             mentioned = room_data.get('mentioned_user', 'N/A')
             deal_id = room_data.get('current_deal_id', 'N/A')
-            room_details += f"    ├ Seller: {sender}\n"
-            room_details += f"    ├ Buyer: {mentioned}\n"
+            room_details += f"    ├ 👤 Seller: {sender}\n"
+            room_details += f"    ├ 👤 Buyer: {mentioned}\n"
             if deal_id:
-                room_details += f"    └ Deal: #{deal_id}\n"
+                room_details += f"    └ 📝 Deal: #{deal_id}\n"
             else:
-                room_details += f"    └ Deal: Pending\n"
+                room_details += f"    └ 📝 Deal: Pending\n"
         room_details += "\n"
 
     footer = (
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
+        f"<i>🕐 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</i>"
     )
 
     await update.message.reply_text(
@@ -3311,7 +3328,12 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await update.message.reply_text("Emptying all rooms... This may take a moment.")
+    await update.message.reply_text(
+        "<b>🧹 EMPTY ALL ROOMS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🔄 Processing... This may take a moment.",
+        parse_mode="HTML"
+    )
 
     total_kicked = 0
     rooms_cleaned = 0
@@ -3388,10 +3410,13 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_deals()
 
     await update.message.reply_text(
-        f"<b>All Rooms Emptied</b>\n\n"
-        f"Rooms cleaned: {rooms_cleaned}\n"
-        f"Members removed: {total_kicked}\n\n"
-        f"All rooms are now available for new deals.",
+        f"<b>🧹 EMPTY ALL ROOMS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ Operation Complete</b>\n\n"
+        f"<b>📊 Results:</b>\n"
+        f"├ 🏠 Rooms Cleaned: <b>{rooms_cleaned}</b>\n"
+        f"└ 👤 Members Removed: <b>{total_kicked}</b>\n\n"
+        f"<i>All rooms are now available for new deals.</i>",
         parse_mode="HTML"
     )
 
@@ -3411,10 +3436,13 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_rooms()
 
     await update.message.reply_text(
-        f"<b>All Rooms Deleted</b>\n\n"
-        f"Deleted {room_count} room(s) from the database.\n"
-        f"Old rooms will no longer be used for escrow.\n\n"
-        f"Use /newrooms to create 20 new escrow rooms.",
+        f"<b>🗑️ DELETE ALL ROOMS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ Operation Complete</b>\n\n"
+        f"<b>📊 Results:</b>\n"
+        f"└ 🏠 Rooms Deleted: <b>{room_count}</b>\n\n"
+        f"<i>Old rooms will no longer be used for escrow.</i>\n\n"
+        f"💡 Use /newrooms to create 20 new escrow rooms.",
         parse_mode="HTML"
     )
     log_info(f"All {room_count} rooms deleted by admin {user_id}")
@@ -3434,7 +3462,11 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await init_userbot()
 
     await update.message.reply_text(
-        "🔄 Clearing existing rooms and creating 20 new escrow rooms... This may take a few minutes."
+        "<b>🏗️ CREATE NEW ROOMS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🔄 Clearing existing rooms and creating 20 new escrow rooms...\n\n"
+        "<i>This may take a few minutes.</i>",
+        parse_mode="HTML"
     )
 
     # Clear existing rooms data to stop using old groups
@@ -3478,10 +3510,13 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_error(f"Room {room_number}: Setup failed - {e}")
 
     await update.message.reply_text(
-        f"<b>✅ Room Creation Complete</b>\n\n"
-        f"Created: {created_count} new room(s)\n"
-        f"Failed: {failed_count} room(s)\n"
-        f"Total rooms: {len(rooms)}",
+        f"<b>🏗️ CREATE NEW ROOMS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ Operation Complete</b>\n\n"
+        f"<b>📊 Results:</b>\n"
+        f"├ 🟢 Created: <b>{created_count}</b> room(s)\n"
+        f"├ 🔴 Failed: <b>{failed_count}</b> room(s)\n"
+        f"└ 📋 Total Rooms: <b>{len(rooms)}</b>",
         parse_mode="HTML"
     )
 
@@ -3498,9 +3533,11 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "<b>Usage:</b>\n"
-            "<code>/ban @username</code> - Ban by username\n"
-            "<code>/ban 123456789</code> - Ban by user ID",
+            "<b>🚫 BAN USER</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>📖 Usage:</b>\n"
+            "├ <code>/ban @username</code> - Ban by username\n"
+            "└ <code>/ban 123456789</code> - Ban by user ID",
             parse_mode="HTML"
         )
         return
@@ -3518,7 +3555,12 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         display_name = f"@{ban_username}"
 
     if ban_id in banned_users:
-        await update.message.reply_text(f"{display_name} is already banned.")
+        await update.message.reply_text(
+            f"<b>🚫 BAN USER</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚠️ {display_name} is already banned.",
+            parse_mode="HTML"
+        )
         return
 
     banned_users[ban_id] = {
@@ -3529,8 +3571,11 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_banned_users()
 
     await update.message.reply_text(
-        f"<b>User Banned</b>\n\n"
-        f"{display_name} has been banned from using bot commands.",
+        f"<b>🚫 BAN USER</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ User Banned Successfully</b>\n\n"
+        f"<b>👤 User:</b> {display_name}\n"
+        f"<b>📋 Status:</b> Banned from bot commands",
         parse_mode="HTML"
     )
     log_info(f"User {display_name} banned by admin {user_id}")
@@ -3548,9 +3593,11 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "<b>Usage:</b>\n"
-            "<code>/unban @username</code> - Unban by username\n"
-            "<code>/unban 123456789</code> - Unban by user ID",
+            "<b>✅ UNBAN USER</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>📖 Usage:</b>\n"
+            "├ <code>/unban @username</code> - Unban by username\n"
+            "└ <code>/unban 123456789</code> - Unban by user ID",
             parse_mode="HTML"
         )
         return
@@ -3567,15 +3614,23 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         display_name = f"@{ban_username}"
 
     if ban_id not in banned_users:
-        await update.message.reply_text(f"{display_name} is not banned.")
+        await update.message.reply_text(
+            f"<b>✅ UNBAN USER</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"⚠️ {display_name} is not banned.",
+            parse_mode="HTML"
+        )
         return
 
     del banned_users[ban_id]
     save_banned_users()
 
     await update.message.reply_text(
-        f"<b>User Unbanned</b>\n\n"
-        f"{display_name} can now use bot commands again.",
+        f"<b>✅ UNBAN USER</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ User Unbanned Successfully</b>\n\n"
+        f"<b>👤 User:</b> {display_name}\n"
+        f"<b>📋 Status:</b> Can now use bot commands",
         parse_mode="HTML"
     )
     log_info(f"User {display_name} unbanned by admin {user_id}")
@@ -3593,10 +3648,12 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "<b>Usage:</b>\n"
-            "<code>/gunban @username</code> - Unban by username\n"
-            "<code>/gunban 123456789</code> - Unban by user ID\n\n"
-            "<i>This unbans the user from all groups where the bot is admin.</i>",
+            "<b>🌐 GROUP UNBAN</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "<b>📖 Usage:</b>\n"
+            "├ <code>/gunban @username</code> - Unban by username\n"
+            "└ <code>/gunban 123456789</code> - Unban by user ID\n\n"
+            "<i>Unbans user from all groups where bot is admin.</i>",
             parse_mode="HTML"
         )
         return
@@ -3622,8 +3679,10 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target_user_id = entity.id
         except Exception as e:
             await update.message.reply_text(
-                f"<b>User Not Found</b>\n\n"
-                f"Could not find user {display_name}.\n"
+                f"<b>🌐 GROUP UNBAN</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"❌ <b>User Not Found</b>\n\n"
+                f"<b>👤 User:</b> {display_name}\n"
                 f"<i>Error: {str(e)}</i>",
                 parse_mode="HTML"
             )
@@ -3631,13 +3690,20 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not target_user_id:
         await update.message.reply_text(
-            f"<b>Invalid User</b>\n\n"
+            f"<b>🌐 GROUP UNBAN</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"❌ <b>Invalid User</b>\n\n"
             f"Could not resolve {display_name} to a user ID.",
             parse_mode="HTML"
         )
         return
 
-    await update.message.reply_text(f"Unbanning {display_name} from all groups where bot is admin...")
+    await update.message.reply_text(
+        f"<b>🌐 GROUP UNBAN</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔄 Unbanning {display_name} from all groups...",
+        parse_mode="HTML"
+    )
 
     unbanned_count = 0
     failed_count = 0
@@ -3687,19 +3753,24 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 log_warning(f"Could not unban user {target_user_id} from {entity.title}: {e}")
     except Exception as e:
         await update.message.reply_text(
-            f"<b>Error</b>\n\n"
+            f"<b>🌐 GROUP UNBAN</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"❌ <b>Error</b>\n\n"
             f"Could not get group list: {str(e)}",
             parse_mode="HTML"
         )
         return
 
     await update.message.reply_text(
-        f"<b>User Unbanned from Groups</b>\n\n"
-        f"<b>User:</b> {display_name}\n"
-        f"<b>Groups checked:</b> {groups_checked}\n"
-        f"<b>Successfully unbanned:</b> {unbanned_count}\n"
-        f"<b>Failed/Not banned:</b> {failed_count}\n\n"
-        f"<i>The user can now rejoin these groups.</i>",
+        f"<b>🌐 GROUP UNBAN</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>✅ Operation Complete</b>\n\n"
+        f"<b>👤 User:</b> {display_name}\n\n"
+        f"<b>📊 Results:</b>\n"
+        f"├ 🔍 Groups Checked: <b>{groups_checked}</b>\n"
+        f"├ 🟢 Unbanned: <b>{unbanned_count}</b>\n"
+        f"└ 🔴 Failed/Not Banned: <b>{failed_count}</b>\n\n"
+        f"<i>User can now rejoin these groups.</i>",
         parse_mode="HTML"
     )
     log_info(f"User {display_name} unbanned from {unbanned_count} groups by admin {user_id}")
@@ -3714,19 +3785,37 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not banned_users:
-        await update.message.reply_text("No users are currently banned.")
+        await update.message.reply_text(
+            "<b>📋 BANNED USERS</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "✅ No users are currently banned.",
+            parse_mode="HTML"
+        )
         return
 
-    msg = "<b>BANNED USERS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    total_banned = len(banned_users)
+    msg = (
+        f"<b>📋 BANNED USERS</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>📊 Total Banned:</b> {total_banned}\n\n"
+        f"<b>👤 User List:</b>\n"
+    )
 
-    for ban_id, ban_data in banned_users.items():
+    for i, (ban_id, ban_data) in enumerate(banned_users.items(), 1):
         username = ban_data.get('username')
         banned_at = ban_data.get('banned_at', 'Unknown')
-        if username:
-            msg += f"• @{username}\n"
+        date_str = banned_at[:10] if len(banned_at) > 10 else banned_at
+        
+        if i == total_banned:
+            prefix = "└"
         else:
-            msg += f"• ID: {ban_id}\n"
-        msg += f"  <i>Banned: {banned_at[:10] if len(banned_at) > 10 else banned_at}</i>\n\n"
+            prefix = "├"
+        
+        if username:
+            msg += f"{prefix} 🚫 @{username}\n"
+        else:
+            msg += f"{prefix} 🚫 ID: {ban_id}\n"
+        msg += f"    <i>📅 {date_str}</i>\n"
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
@@ -3873,27 +3962,27 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
-    msg = "<b>📋 AVAILABLE COMMANDS</b>\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-
-    # General commands (available to everyone)
-    msg += "<b>General Commands:</b>\n"
-    msg += "/escrow @username - Start a new escrow deal\n"
-    msg += "/exampleform - Show sample deal form format\n"
-    msg += "/clean - Clean up room after deal completion\n\n"
-
-    # Admin commands
-    msg += "<b>Admin Commands:</b>\n"
-    msg += "/cmd - Show this command list\n"
-    msg += "/rooms - View all room statuses\n"
-    msg += "/empty - Empty all rooms and reset deals\n"
-    msg += "/deleteall - Delete all rooms from database\n"
-    msg += "/newrooms - Create 20 new escrow rooms\n"
-    msg += "/ban @username - Ban a user from using the bot\n"
-    msg += "/unban @username - Unban a user from bot commands\n"
-    msg += "/gunban @username - Unban a user from all groups\n"
-    msg += "/banned - List all banned users\n"
-    msg += "/setup_rooms - Initialize room pool\n"
-    msg += "/setaddy [deal_id] - Set specific address for a deal\n"
+    msg = (
+        "<b>📋 COMMAND LIST</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>👥 General Commands:</b>\n"
+        "├ /escrow @username - Start escrow deal\n"
+        "├ /exampleform - Show deal form format\n"
+        "├ /clean - Clean room after deal\n"
+        "└ /set2fa [code] - Set your 2FA code\n\n"
+        "<b>🔧 Admin Commands:</b>\n"
+        "├ /cmd - Show this command list\n"
+        "├ /rooms - View all room statuses\n"
+        "├ /empty - Empty all rooms\n"
+        "├ /deleteall - Delete all rooms\n"
+        "├ /newrooms - Create 20 new rooms\n"
+        "├ /setup_rooms - Initialize room pool\n"
+        "├ /setaddy [deal_id] - Set deal address\n"
+        "├ /ban @user - Ban user from bot\n"
+        "├ /unban @user - Unban from bot\n"
+        "├ /gunban @user - Unban from all groups\n"
+        "└ /banned - List banned users"
+    )
 
     await update.message.reply_text(msg, parse_mode="HTML")
 
