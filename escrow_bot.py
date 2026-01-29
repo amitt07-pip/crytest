@@ -357,6 +357,47 @@ async def update_deal_log(bot, deal_id, status):
         log_error(f"Failed to update deal log: {e}")
 
 
+async def check_user_banned_in_room(user_id, channel_id):
+    """Check if a user is banned in a specific room."""
+    global userbot_client
+    if userbot_client is None:
+        await init_userbot()
+    
+    try:
+        full_channel_id = int(f"-100{channel_id}")
+        from telethon.tl.functions.channels import GetParticipantRequest
+        from telethon.tl.types import ChannelParticipantBanned
+        try:
+            participant = await userbot_client(GetParticipantRequest(
+                channel=full_channel_id,
+                participant=user_id
+            ))
+            if isinstance(participant.participant, ChannelParticipantBanned):
+                return True
+            return False
+        except Exception:
+            return False
+    except Exception:
+        return False
+
+
+async def get_free_room_for_users(sender_user_id, mentioned_user_id):
+    """Get a free room where both users are not banned."""
+    global userbot_client
+    if userbot_client is None:
+        await init_userbot()
+    
+    for room_num, room_data in rooms.items():
+        if room_data.get('status') == 'free':
+            channel_id = room_data.get('channel_id')
+            if channel_id:
+                sender_banned = await check_user_banned_in_room(sender_user_id, channel_id)
+                mentioned_banned = await check_user_banned_in_room(mentioned_user_id, channel_id)
+                if not sender_banned and not mentioned_banned:
+                    return room_num, room_data
+    return None, None
+
+
 def get_free_room():
     """Get a free room from the pool."""
     for room_num, room_data in rooms.items():
@@ -2810,6 +2851,7 @@ async def handle_join_request(
 
 
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global userbot_client
     # Only work in groups, not DMs
     if update.effective_chat.type == "private":
         return
@@ -2840,7 +2882,20 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sender_username = f"@{sender}" if sender else "User"
 
-    room_num, room_data = get_free_room()
+    # Get mentioned user's ID using userbot
+    if userbot_client is None:
+        await init_userbot()
+    
+    mentioned_user_id = None
+    try:
+        mentioned_clean = mentioned_user.lstrip("@")
+        mentioned_entity = await userbot_client.get_entity(mentioned_clean)
+        mentioned_user_id = mentioned_entity.id
+    except Exception as e:
+        log_warning(f"Could not get mentioned user ID: {e}")
+
+    # Find a room where both users are not banned
+    room_num, room_data = await get_free_room_for_users(user_id, mentioned_user_id)
 
     if room_num is None:
         missing_room = None
@@ -3148,48 +3203,24 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 hash=0
             ))
 
+            from datetime import timedelta
             for user in participants.users:
                 if user.id not in protected_ids:
                     try:
-                        # First kick the user by banning them
-                        ban_rights = ChatBannedRights(
-                            until_date=None,
+                        # Kick user with a temporary ban that expires in 35 seconds
+                        # This kicks them but doesn't permanently ban them
+                        kick_rights = ChatBannedRights(
+                            until_date=datetime.now() + timedelta(seconds=35),
                             view_messages=True
                         )
                         await userbot_client(EditBannedRequest(
                             channel=chat_id,
                             participant=user.id,
-                            banned_rights=ban_rights
+                            banned_rights=kick_rights
                         ))
                         kicked_count += 1
                     except Exception as kick_error:
                         log_warning(f"Could not kick user {user.id}: {kick_error}")
-            
-            # Wait a moment before unbanning all kicked users
-            await asyncio.sleep(1)
-            
-            # Now unban all kicked users so they can rejoin later
-            for user in participants.users:
-                if user.id not in protected_ids:
-                    try:
-                        unban_rights = ChatBannedRights(
-                            until_date=None,
-                            view_messages=False,
-                            send_messages=False,
-                            send_media=False,
-                            send_stickers=False,
-                            send_gifs=False,
-                            send_games=False,
-                            send_inline=False,
-                            embed_links=False
-                        )
-                        await userbot_client(EditBannedRequest(
-                            channel=chat_id,
-                            participant=user.id,
-                            banned_rights=unban_rights
-                        ))
-                    except Exception as unban_error:
-                        log_warning(f"Could not unban user {user.id}: {unban_error}")
         except Exception as get_error:
             log_warning(f"Could not get participants: {get_error}")
 
@@ -3381,7 +3412,7 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Create 20 new escrow rooms."""
+    """Create 20 new escrow rooms. Clears existing rooms and creates fresh ones."""
     global userbot_client, rooms
 
     user_id = update.effective_user.id
@@ -3394,8 +3425,13 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await init_userbot()
 
     await update.message.reply_text(
-        "Creating 20 new escrow rooms... This may take a few minutes."
+        "🔄 Clearing existing rooms and creating 20 new escrow rooms... This may take a few minutes."
     )
+
+    # Clear existing rooms data to stop using old groups
+    rooms.clear()
+    save_rooms()
+    log_info("Cleared all existing room data")
 
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
@@ -3404,9 +3440,6 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed_count = 0
 
     for room_number in range(1, 21):
-        if str(room_number) in rooms:
-            continue
-
         try:
             invite_link, room_num, channel_id = await create_escrow_group(
                 room_number,
@@ -3436,8 +3469,8 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_error(f"Room {room_number}: Setup failed - {e}")
 
     await update.message.reply_text(
-        f"<b>Room Creation Complete</b>\n\n"
-        f"Created: {created_count} room(s)\n"
+        f"<b>✅ Room Creation Complete</b>\n\n"
+        f"Created: {created_count} new room(s)\n"
         f"Failed: {failed_count} room(s)\n"
         f"Total rooms: {len(rooms)}",
         parse_mode="HTML"
