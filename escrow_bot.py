@@ -382,7 +382,7 @@ async def check_user_banned_in_room(user_id, channel_id):
 
 
 async def get_free_room_for_users(sender_user_id, mentioned_user_id):
-    """Get a free room where both users are not banned."""
+    """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
     if userbot_client is None:
         await init_userbot()
@@ -391,6 +391,15 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id):
         if room_data.get('status') == 'free':
             channel_id = room_data.get('channel_id')
             if channel_id:
+                # First verify the group still exists
+                try:
+                    full_channel_id = int(f"-100{channel_id}")
+                    await userbot_client.get_entity(full_channel_id)
+                except Exception:
+                    # Group doesn't exist, skip this room
+                    log_warning(f"Room {room_num} group not accessible, skipping")
+                    continue
+                
                 sender_banned = await check_user_banned_in_room(sender_user_id, channel_id)
                 mentioned_banned = await check_user_banned_in_room(mentioned_user_id, channel_id)
                 if not sender_banned and not mentioned_banned:
