@@ -280,30 +280,33 @@ def truncate_address(address):
     return f"{address[:3]}...{address[-4:]}"
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None):
     """Build the deal log message for the log channel."""
+    # Format token display (e.g., USDT-BSC)
+    token_display = token if token else "N/A"
+    
+    # Format amount display
+    amount_display = amount if amount else "N/A"
+    
+    # Get escrow sender username for header
+    sender_display = escrow_sender if escrow_sender else "N/A"
+    
     msg = (
-        f"🆕 <b>New Deal Started!</b>\n\n"
-        f"🔖 <b>Deal ID:</b> #{deal_id}\n"
-        f"👤 <b>Buyer:</b> {buyer}\n"
-        f"💼 <b>Seller:</b> {seller}\n"
-        f"🏠 <b>Group:</b> Room {room_num}\n"
+        f"<b>ESCROW ROOM {room_num} OCCUPIED BY {sender_display}</b>\n\n"
+        f"<b>Room:</b> Room {room_num}\n"
+        f"<b>Buyer:</b> {buyer}\n"
+        f"<b>Seller:</b> {seller}\n"
+        f"<b>Token:</b> {token_display}\n"
+        f"<b>Amount:</b> {amount_display}\n"
+        f"<b>Status:</b> {status}"
     )
-    
-    if amount:
-        msg += f"💰 <b>Amount:</b> {amount}\n"
-    
-    if deposit_address:
-        msg += f"💳 <b>Deposit Address:</b> {truncate_address(deposit_address)}\n"
-    
-    msg += f"📊 <b>Current Status:</b> <b><u>{status}</u></b>"
     return msg
 
 
-async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started"):
+async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started", token=None, amount=None, escrow_sender=None):
     """Send initial deal log message to the log channel."""
     try:
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, None, amount, token, escrow_sender)
         sent_msg = await bot.send_message(
             chat_id=DEAL_LOG_CHANNEL_ID,
             text=msg,
@@ -331,20 +334,26 @@ async def update_deal_log(bot, deal_id, status):
         if not log_message_id:
             return
         
-        buyer = deal.get('mentioned_user', 'N/A')
-        seller = deal.get('sender_user', 'N/A')
+        buyer = deal.get('buyer_username', 'N/A')
+        seller = deal.get('seller_username', 'N/A')
         room_num = deal.get('room_number', 'N/A')
+        escrow_sender = deal.get('sender_user', 'N/A')
         
         # Include deposit address in log once it's set
         deposit_address = deal.get('deposit_address')
         
-        # Get deal amount (USDT or USDC)
+        # Get deal amount (USDT or USDC) - just the number
         amount = deal.get('amount_usdt') or deal.get('amount_usdc')
-        if amount:
-            currency = "USDT" if deal.get('amount_usdt') else "USDC"
-            amount = f"{amount} {currency}"
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount)
+        # Build token display (e.g., USDT-BSC)
+        currency = deal.get('currency', 'USDT')
+        network = deal.get('network', '')
+        if network:
+            token = f"{currency}-{network.upper()}"
+        else:
+            token = currency
+        
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
@@ -2652,11 +2661,22 @@ async def handle_message(
             room_num = "N/A"
 
         import time as time_module
+        
+        # Get escrow sender username from group_data
+        full_channel_id = str(chat_id)
+        escrow_sender = None
+        if full_channel_id in group_data:
+            escrow_sender = group_data[full_channel_id].get('sender_user')
+        
         deals[deal_id] = {
             'chat_id': chat_id,
             'seller': form_data['seller'],
             'buyer': form_data['buyer'],
+            'buyer_username': form_data['buyer'],
+            'seller_username': form_data['seller'],
             'amount_crypto': amount_crypto,
+            'amount_usdt': form_data.get('amount_usdt'),
+            'amount_usdc': form_data.get('amount_usdc'),
             'amount_inr': form_data.get('amount_inr', ''),
             'payment_method': form_data.get('payment_method', ''),
             'time': form_data.get('time', ''),
@@ -2669,13 +2689,12 @@ async def handle_message(
             'seller_address_msg_id': None,
             'room_number': room_num,
             'mentioned_user': form_data['buyer'],
-            'sender_user': form_data['seller'],
+            'sender_user': escrow_sender,
             'form_submitted_at': time_module.time()
         }
         save_deals()
 
         # Store form submission time in group_data for duration calculation
-        full_channel_id = str(chat_id)
         if full_channel_id in group_data:
             group_data[full_channel_id]["deal_start_time"] = time_module.time()
             save_group_data()
@@ -2684,7 +2703,7 @@ async def handle_message(
         buyer = form_data['buyer']
 
         # Send deal log to log channel
-        await send_deal_log(context.bot, deal_id, buyer, seller, room_num, "Deal Started")
+        await send_deal_log(context.bot, deal_id, buyer, seller, room_num, "Deal Started", None, amount_crypto, escrow_sender)
 
         msg = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
