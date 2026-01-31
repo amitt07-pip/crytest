@@ -2920,6 +2920,15 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
+    # Check if sender has a username
+    if not sender:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="You need a username to deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
     # Check if user is banned
     if is_user_banned(user_id, sender):
         await context.bot.send_message(
@@ -2971,12 +2980,27 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await init_userbot()
     
     mentioned_user_id = None
+    mentioned_has_username = True
     try:
         mentioned_clean = mentioned_user.lstrip("@")
         mentioned_entity = await userbot_client.get_entity(mentioned_clean)
         mentioned_user_id = mentioned_entity.id
+        # Check if mentioned user has a username
+        if not getattr(mentioned_entity, 'username', None):
+            mentioned_has_username = False
     except Exception as e:
         log_warning(f"Could not get mentioned user ID: {e}")
+        # If we can't get the entity, assume they don't have a valid username
+        mentioned_has_username = False
+
+    # Check if mentioned user has a username
+    if not mentioned_has_username:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="You need a username to deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
 
     # Find a free room where both users are not banned
     room_num, room_data = await get_free_room_for_users(user_id, mentioned_user_id)
