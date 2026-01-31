@@ -273,6 +273,38 @@ def is_user_banned(user_id, username):
     return False
 
 
+def get_user_active_deal(username):
+    """Check if a user has an active escrow deal. Returns (username, message_link) if found, else (None, None)."""
+    if not username:
+        return None, None
+    
+    username_clean = username.lstrip('@').lower()
+    
+    for channel_id, data in group_data.items():
+        sender_user = data.get('sender_user', '').lstrip('@').lower()
+        mentioned_user = data.get('mentioned_user', '').lstrip('@').lower()
+        escrow_message_id = data.get('escrow_message_id')
+        escrow_chat_id = data.get('escrow_chat_id')
+        
+        if username_clean in [sender_user, mentioned_user]:
+            if escrow_message_id and escrow_chat_id:
+                chat_id_str = str(escrow_chat_id)
+                if chat_id_str.startswith('-100'):
+                    chat_id_for_link = chat_id_str[4:]
+                elif chat_id_str.startswith('-'):
+                    chat_id_for_link = chat_id_str[1:]
+                else:
+                    chat_id_for_link = chat_id_str
+                message_link = f"https://t.me/c/{chat_id_for_link}/{escrow_message_id}"
+                
+                if username_clean == sender_user:
+                    return data.get('sender_user', username), message_link
+                else:
+                    return data.get('mentioned_user', username), message_link
+    
+    return None, None
+
+
 def truncate_address(address):
     """Truncate address to first 3 and last 4 characters."""
     if not address or len(address) < 8:
@@ -2909,6 +2941,28 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_user = "@" + mentioned_user
 
     sender_username = f"@{sender}" if sender else "User"
+
+    # Check if sender has an active escrow deal
+    active_user, active_link = get_user_active_deal(sender_username)
+    if active_user:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        return
+
+    # Check if mentioned user has an active escrow deal
+    active_user, active_link = get_user_active_deal(mentioned_user)
+    if active_user:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        return
 
     # Get mentioned user's ID using userbot
     if userbot_client is None:
