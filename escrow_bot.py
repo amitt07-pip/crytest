@@ -2976,10 +2976,26 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         log_warning(f"Could not get mentioned user ID: {e}")
 
-    # Find a room where both users are not banned
+    # Find a free room where both users are not banned
     room_num, room_data = await get_free_room_for_users(user_id, mentioned_user_id)
 
     if room_num is None:
+        # Check if there are any free rooms at all
+        has_free_room = False
+        for r_num, r_data in rooms.items():
+            if r_data.get('status') == 'free':
+                has_free_room = True
+                break
+        
+        if has_free_room:
+            # Free rooms exist but users are banned in all of them
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="❌ No available escrow rooms for these users. Please try again later."
+            )
+            return
+        
+        # No free rooms - check if we can create a new one
         missing_room = None
         for i in range(1, 21):
             if str(i) not in rooms:
