@@ -2949,7 +2949,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
             parse_mode="HTML",
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
+            reply_to_message_id=update.message.message_id
         )
         return
 
@@ -2960,7 +2961,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=chat_id,
             text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
             parse_mode="HTML",
-            disable_web_page_preview=True
+            disable_web_page_preview=True,
+            reply_to_message_id=update.message.message_id
         )
         return
 
@@ -3289,6 +3291,12 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if room_num:
         mark_room_free(room_num)
         log_info(f"Room {room_num} marked as free")
+
+    # Clear group_data entry so users can start new deals
+    if full_channel_id in group_data:
+        del group_data[full_channel_id]
+        save_group_data()
+        log_info(f"Group data cleared for channel {full_channel_id}")
 
     kicked_count = 0
     try:
