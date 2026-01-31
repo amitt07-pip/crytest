@@ -1259,8 +1259,8 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             deal['status'] = 'payment_received'
             save_deals()
 
-            # Update deal log - Payment Detected
-            await update_deal_log(bot, deal_id, "Payment Detected")
+            # Update deal log - Deposit Detected with amount
+            await update_deal_log(bot, deal_id, f"Deposit Detected [ {total_received} {currency} ]")
 
             detected_msg = build_payment_detected_message(
                 deal_id, latest_amount, total_received, deal_amount, currency
