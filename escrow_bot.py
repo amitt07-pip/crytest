@@ -2767,6 +2767,20 @@ async def handle_message(
         if full_channel_id in group_data:
             escrow_sender = group_data[full_channel_id].get('sender_user')
         
+        # Determine fixed address index based on room number
+        # Odd rooms (1,3,5,7,9,11,13,15,17,19) use Address 1 (index 0)
+        # Even rooms (2,4,6,8,10,12,14,16,18,20) use Address 2 (index 1)
+        fixed_address_index = None
+        if room_num != "N/A":
+            try:
+                room_num_int = int(room_num)
+                if room_num_int % 2 == 1:  # Odd room
+                    fixed_address_index = 0  # Address 1
+                else:  # Even room
+                    fixed_address_index = 1  # Address 2
+            except (ValueError, TypeError):
+                pass
+        
         deals[deal_id] = {
             'chat_id': chat_id,
             'seller': form_data['seller'],
@@ -2789,7 +2803,8 @@ async def handle_message(
             'room_number': room_num,
             'mentioned_user': form_data['buyer'],
             'sender_user': escrow_sender,
-            'form_submitted_at': time_module.time()
+            'form_submitted_at': time_module.time(),
+            'fixed_address_index': fixed_address_index
         }
         save_deals()
 
