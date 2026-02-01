@@ -723,11 +723,32 @@ def build_deposit_message(deal, deal_id):
                     qr_image = SOL_QR_IMAGES[fixed_index]
                 elif network == "USDC_BSC" and fixed_index < len(USDC_BSC_QR_IMAGES):
                     qr_image = USDC_BSC_QR_IMAGES[fixed_index]
-            # USDC_POLYGON and USDC_SOL have single addresses, no fixed_index needed
-            if network == "USDC_POLYGON":
-                qr_image = USDC_POLYGON_QR_IMAGE
-            elif network == "USDC_SOL":
-                qr_image = USDC_SOL_QR_IMAGE
+            # If still no qr_image, try to find it by matching deposit address
+            if not qr_image:
+                if network == "BSC":
+                    for i, addr in enumerate(BSC_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = BSC_QR_IMAGES[i]
+                            break
+                elif network == "POLYGON":
+                    for i, addr in enumerate(POLYGON_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = POLYGON_QR_IMAGES[i]
+                            break
+                elif network == "SOL":
+                    for i, addr in enumerate(SOL_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = SOL_QR_IMAGES[i]
+                            break
+                elif network == "USDC_BSC":
+                    for i, addr in enumerate(USDC_BSC_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = USDC_BSC_QR_IMAGES[i]
+                            break
+                elif network == "USDC_POLYGON":
+                    qr_image = USDC_POLYGON_QR_IMAGE
+                elif network == "USDC_SOL":
+                    qr_image = USDC_SOL_QR_IMAGE
             if qr_image:
                 deal['qr_image'] = qr_image
     else:
