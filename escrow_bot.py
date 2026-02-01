@@ -3800,7 +3800,7 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Unban a user from using bot commands."""
+    """Unban a user from using bot commands. Triggered by .unban command."""
     global banned_users
 
     user_id = update.effective_user.id
@@ -3809,18 +3809,22 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
-    if not context.args:
+    # Parse arguments from message text (for .unban command)
+    message_text = update.message.text.strip()
+    parts = message_text.split(maxsplit=1)
+    
+    if len(parts) < 2:
         await update.message.reply_text(
             "<b>✅ UNBAN USER</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>📖 Usage:</b>\n"
-            "├ <code>/unban @username</code> - Unban by username\n"
-            "└ <code>/unban 123456789</code> - Unban by user ID",
+            "├ <code>.unban @username</code> - Unban by username\n"
+            "└ <code>.unban 123456789</code> - Unban by user ID",
             parse_mode="HTML"
         )
         return
 
-    target = context.args[0]
+    target = parts[1].split()[0]
 
     # Check if it's a user ID (numeric) or username
     if target.isdigit():
@@ -3855,7 +3859,7 @@ async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Unban a user from all groups where the userbot is admin."""
+    """Unban a user from all groups where the userbot is admin. Triggered by .gunban command."""
     global userbot_client
 
     user_id = update.effective_user.id
@@ -3864,19 +3868,23 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
-    if not context.args:
+    # Parse arguments from message text (for .gunban command)
+    message_text = update.message.text.strip()
+    parts = message_text.split(maxsplit=1)
+    
+    if len(parts) < 2:
         await update.message.reply_text(
             "<b>🌐 GROUP UNBAN</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>📖 Usage:</b>\n"
-            "├ <code>/gunban @username</code> - Unban by username\n"
-            "└ <code>/gunban 123456789</code> - Unban by user ID\n\n"
+            "├ <code>.gunban @username</code> - Unban by username\n"
+            "└ <code>.gunban 123456789</code> - Unban by user ID\n\n"
             "<i>Unbans user from all groups where bot is admin.</i>",
             parse_mode="HTML"
         )
         return
 
-    target = context.args[0]
+    target = parts[1].split()[0]
 
     if userbot_client is None:
         await init_userbot()
@@ -4021,24 +4029,28 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Set a specific address (Address 1 or Address 2) for a deal."""
+    """Set a specific address (Address 1 or Address 2) for a deal. Triggered by .setaddy command."""
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
         return
 
-    if not context.args:
+    # Parse arguments from message text (for .setaddy command)
+    message_text = update.message.text.strip()
+    parts = message_text.split(maxsplit=1)
+    
+    if len(parts) < 2:
         await update.message.reply_text(
             "<b>⚙️ ADDRESS CONFIGURATION</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<b>Usage:</b> <code>/setaddy [deal_id]</code>\n\n"
-            "<b>Example:</b> <code>/setaddy D1234</code>",
+            "<b>Usage:</b> <code>.setaddy [deal_id]</code>\n\n"
+            "<b>Example:</b> <code>.setaddy D1234</code>",
             parse_mode="HTML"
         )
         return
 
-    deal_id = context.args[0].upper()
+    deal_id = parts[1].split()[0].upper()
     if not deal_id.startswith("D"):
         deal_id = f"D{deal_id}"
 
@@ -4171,16 +4183,16 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ /clean - Clean room after deal\n"
         "└ /set2fa [code] - Set your 2FA code\n\n"
         "<b>🔧 Admin Commands:</b>\n"
-        "├ /cmd - Show this command list\n"
-        "├ /rooms - View all room statuses\n"
-        "├ /empty - Empty all rooms\n"
-        "├ /deleteall - Delete all rooms\n"
-        "├ /newrooms - Create 20 new rooms\n"
-        "├ /setup_rooms - Initialize room pool\n"
-        "├ /setaddy [deal_id] - Set deal address\n"
+        "├ .cmd - Show this command list\n"
+        "├ .rooms - View all room statuses\n"
+        "├ .empty - Empty all rooms\n"
+        "├ .deleteall - Delete all rooms\n"
+        "├ .newrooms - Create 20 new rooms\n"
+        "├ .setup_rooms - Initialize room pool\n"
+        "├ .setaddy [deal_id] - Set deal address\n"
         "├ .ban @user - Ban user from bot\n"
-        "├ /unban @user - Unban from bot\n"
-        "├ /gunban @user - Unban from all groups\n"
+        "├ .unban @user - Unban from bot\n"
+        "├ .gunban @user - Unban from all groups\n"
         "└ .banned - List banned users"
     )
 
@@ -4214,21 +4226,23 @@ async def main():
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
-    app.add_handler(CommandHandler("setup_rooms", setup_rooms))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
-    app.add_handler(CommandHandler("rooms", rooms_status))
-    app.add_handler(CommandHandler("empty", empty_all_rooms))
-    app.add_handler(CommandHandler("deleteall", delete_all_rooms))
-    app.add_handler(CommandHandler("newrooms", create_new_rooms))
-    app.add_handler(MessageHandler(filters.Regex(r'^\.ban\b'), ban_user))
-    app.add_handler(CommandHandler("unban", unban_user))
-    app.add_handler(CommandHandler("gunban", group_unban_user))
-    app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
-    app.add_handler(CommandHandler("cmd", cmd_list))
-    app.add_handler(CommandHandler("setaddy", set_address))
     app.add_handler(CommandHandler("set2fa", set_2fa))
+    # Admin commands (dot prefix)
+    app.add_handler(MessageHandler(filters.Regex(r'^\.setup_rooms\b'), setup_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.rooms\b'), rooms_status))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.empty\b'), empty_all_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.deleteall\b'), delete_all_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.newrooms\b'), create_new_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.ban\b'), ban_user))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.unban\b'), unban_user))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.gunban\b'), group_unban_user))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
