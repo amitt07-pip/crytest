@@ -3644,7 +3644,7 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ban a user from using bot commands."""
+    """Ban a user from using bot commands. Triggered by .ban command."""
     global banned_users
 
     user_id = update.effective_user.id
@@ -3653,18 +3653,22 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
-    if not context.args:
+    # Parse arguments from message text (for .ban command)
+    message_text = update.message.text.strip()
+    parts = message_text.split(maxsplit=1)
+    
+    if len(parts) < 2:
         await update.message.reply_text(
             "<b>🚫 BAN USER</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>📖 Usage:</b>\n"
-            "├ <code>/ban @username</code> - Ban by username\n"
-            "└ <code>/ban 123456789</code> - Ban by user ID",
+            "├ <code>.ban @username</code> - Ban by username\n"
+            "└ <code>.ban 123456789</code> - Ban by user ID",
             parse_mode="HTML"
         )
         return
 
-    target = context.args[0]
+    target = parts[1].split()[0]
 
     # Check if it's a user ID (numeric) or username
     if target.isdigit():
@@ -3899,7 +3903,7 @@ async def group_unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all banned users."""
+    """List all banned users. Triggered by .banned command."""
     user_id = update.effective_user.id
 
     # Silently ignore non-admin users
@@ -4100,10 +4104,10 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ /newrooms - Create 20 new rooms\n"
         "├ /setup_rooms - Initialize room pool\n"
         "├ /setaddy [deal_id] - Set deal address\n"
-        "├ /ban @user - Ban user from bot\n"
+        "├ .ban @user - Ban user from bot\n"
         "├ /unban @user - Unban from bot\n"
         "├ /gunban @user - Unban from all groups\n"
-        "└ /banned - List banned users"
+        "└ .banned - List banned users"
     )
 
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -4144,10 +4148,10 @@ async def main():
     app.add_handler(CommandHandler("empty", empty_all_rooms))
     app.add_handler(CommandHandler("deleteall", delete_all_rooms))
     app.add_handler(CommandHandler("newrooms", create_new_rooms))
-    app.add_handler(CommandHandler("ban", ban_user))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.ban\b'), ban_user))
     app.add_handler(CommandHandler("unban", unban_user))
     app.add_handler(CommandHandler("gunban", group_unban_user))
-    app.add_handler(CommandHandler("banned", list_banned))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
     app.add_handler(CommandHandler("cmd", cmd_list))
     app.add_handler(CommandHandler("setaddy", set_address))
     app.add_handler(CommandHandler("set2fa", set_2fa))
