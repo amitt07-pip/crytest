@@ -3531,12 +3531,7 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await update.message.reply_text(
-        "<b>🧹 EMPTY ALL ROOMS</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔄 Processing... This may take a moment.",
-        parse_mode="HTML"
-    )
+    progress_msg = await update.message.reply_text("emptying all rooms.....")
 
     total_kicked = 0
     rooms_cleaned = 0
@@ -3612,16 +3607,7 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     save_deals()
 
-    await update.message.reply_text(
-        f"<b>🧹 EMPTY ALL ROOMS</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>✅ Operation Complete</b>\n\n"
-        f"<b>📊 Results:</b>\n"
-        f"├ 🏠 Rooms Cleaned: <b>{rooms_cleaned}</b>\n"
-        f"└ 👤 Members Removed: <b>{total_kicked}</b>\n\n"
-        f"<i>All rooms are now available for new deals.</i>",
-        parse_mode="HTML"
-    )
+    await progress_msg.edit_text("All rooms have been emptied and are ready to use!")
 
 
 async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
