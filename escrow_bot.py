@@ -3710,10 +3710,11 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Ban a user from using bot commands. Triggered by .ban command."""
+    """Ban a user from the group and blacklist from bot commands. Triggered by .ban command."""
     global banned_users
 
     user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
 
     # Silently ignore non-admin users
     if user_id not in ADMIN_USER_IDS:
@@ -3721,11 +3722,13 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if replying to a message
     reply_to = update.message.reply_to_message
+    target_user_id = None
     if reply_to and reply_to.from_user:
         # Ban the user whose message is being replied to
         target_user = reply_to.from_user
         ban_username = target_user.username.lower() if target_user.username else None
         ban_id = str(target_user.id)
+        target_user_id = target_user.id
         display_name = f"@{target_user.username}" if target_user.username else f"User ID: {ban_id}"
     else:
         # Parse arguments from message text (for .ban command)
@@ -3749,6 +3752,7 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Check if it's a user ID (numeric) or username
         if target.isdigit():
             ban_id = target
+            target_user_id = int(target)
             ban_username = None
             display_name = f"@{ban_id}"
         else:
@@ -3756,19 +3760,22 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ban_id = f"username_{ban_username}"
             display_name = f"@{ban_username}"
 
-    if ban_id in banned_users:
-        await update.message.reply_text(
-            f"{display_name} is already banned from the group!",
-            parse_mode="HTML"
-        )
-        return
+    # First, try to ban the user from the current Telegram group
+    if target_user_id:
+        try:
+            await context.bot.ban_chat_member(chat_id=chat_id, user_id=target_user_id)
+            log_info(f"User {display_name} banned from group {chat_id}")
+        except Exception as e:
+            log_error(f"Failed to ban user from group: {e}")
 
-    banned_users[ban_id] = {
-        "username": ban_username,
-        "banned_by": user_id,
-        "banned_at": datetime.now().isoformat()
-    }
-    save_banned_users()
+    # Then blacklist from bot commands
+    if ban_id not in banned_users:
+        banned_users[ban_id] = {
+            "username": ban_username,
+            "banned_by": user_id,
+            "banned_at": datetime.now().isoformat()
+        }
+        save_banned_users()
 
     await update.message.reply_text(
         f"{display_name} is banned from the group!",
