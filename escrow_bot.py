@@ -268,7 +268,8 @@ def is_user_banned(user_id, username):
     if username:
         username_clean = username.lstrip('@').lower()
         for banned_key, banned_data in banned_users.items():
-            if banned_data.get('username', '').lower() == username_clean:
+            banned_username = banned_data.get('username') or ''
+            if banned_username.lower() == username_clean:
                 return True
     return False
 
