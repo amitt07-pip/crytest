@@ -3719,38 +3719,46 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
-    # Parse arguments from message text (for .ban command)
-    message_text = update.message.text.strip()
-    parts = message_text.split(maxsplit=1)
-    
-    if len(parts) < 2:
-        await update.message.reply_text(
-            "<b>🚫 BAN USER</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "<b>📖 Usage:</b>\n"
-            "├ <code>.ban @username</code> - Ban by username\n"
-            "└ <code>.ban 123456789</code> - Ban by user ID",
-            parse_mode="HTML"
-        )
-        return
-
-    target = parts[1].split()[0]
-
-    # Check if it's a user ID (numeric) or username
-    if target.isdigit():
-        ban_id = target
-        ban_username = None
-        display_name = f"User ID: {ban_id}"
+    # Check if replying to a message
+    reply_to = update.message.reply_to_message
+    if reply_to and reply_to.from_user:
+        # Ban the user whose message is being replied to
+        target_user = reply_to.from_user
+        ban_username = target_user.username.lower() if target_user.username else None
+        ban_id = str(target_user.id)
+        display_name = f"@{target_user.username}" if target_user.username else f"User ID: {ban_id}"
     else:
-        ban_username = target.lstrip('@').lower()
-        ban_id = f"username_{ban_username}"
-        display_name = f"@{ban_username}"
+        # Parse arguments from message text (for .ban command)
+        message_text = update.message.text.strip()
+        parts = message_text.split(maxsplit=1)
+        
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "<b>🚫 BAN USER</b>\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "<b>📖 Usage:</b>\n"
+                "├ <code>.ban @username</code> - Ban by username\n"
+                "├ <code>.ban 123456789</code> - Ban by user ID\n"
+                "└ Reply to a message with <code>.ban</code>",
+                parse_mode="HTML"
+            )
+            return
+
+        target = parts[1].split()[0]
+
+        # Check if it's a user ID (numeric) or username
+        if target.isdigit():
+            ban_id = target
+            ban_username = None
+            display_name = f"@{ban_id}"
+        else:
+            ban_username = target.lstrip('@').lower()
+            ban_id = f"username_{ban_username}"
+            display_name = f"@{ban_username}"
 
     if ban_id in banned_users:
         await update.message.reply_text(
-            f"<b>🚫 BAN USER</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"⚠️ {display_name} is already banned.",
+            f"{display_name} is already banned from the group!",
             parse_mode="HTML"
         )
         return
@@ -3763,11 +3771,7 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_banned_users()
 
     await update.message.reply_text(
-        f"<b>🚫 BAN USER</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>✅ User Banned Successfully</b>\n\n"
-        f"<b>👤 User:</b> {display_name}\n"
-        f"<b>📋 Status:</b> Banned from bot commands",
+        f"{display_name} is banned from the group!",
         parse_mode="HTML"
     )
     log_info(f"User {display_name} banned by admin {user_id}")
