@@ -817,7 +817,7 @@ def build_deposit_message(deal, deal_id):
         f"DO NOT INCLUDE NETWORK FEE, make sure the amount received is "
         f"exact!\n"
         f"<b>Example</b>: If your withdrawal fee is 0.2 {currency} then send "
-        f"<b><u>{float(amount) + 0.2:.1f}</u></b>{currency} so the received "
+        f"<b><u>{float(str(amount).replace(',', '')) + 0.2:.1f}</u></b>{currency} so the received "
         f"amount is <b><u>{amount}</u></b> {currency}\n\n"
         f"Deposit Address: <code>{deposit_address}</code>\n"
         f"Chain: <code>{network_name}</code>\n\n"
