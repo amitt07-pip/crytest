@@ -1692,6 +1692,33 @@ async def handle_callback(
                     save_group_data()
         return
 
+    # Handle show banned list callback - show banned users as popup
+    if data == "show_banned_list":
+        if user_id not in ADMIN_USER_IDS:
+            await query.answer()
+            return
+        
+        if not banned_users:
+            await query.answer("No users are currently banned.", show_alert=True)
+            return
+        
+        # Build the banned users list
+        banned_list = []
+        for ban_id, ban_data in banned_users.items():
+            username = ban_data.get('username')
+            if username:
+                banned_list.append(f"@{username} ({ban_id})")
+            else:
+                banned_list.append(f"ID: {ban_id}")
+        
+        popup_text = "\n".join(banned_list)
+        # Telegram popup has a character limit, truncate if needed
+        if len(popup_text) > 200:
+            popup_text = popup_text[:197] + "..."
+        
+        await query.answer(popup_text, show_alert=True)
+        return
+
     await query.answer()
 
     if data == "switch_to_usdc":
@@ -3912,38 +3939,20 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not banned_users:
         await update.message.reply_text(
-            "<b>📋 BANNED USERS</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "✅ No users are currently banned.",
+            "<b>BANNED USERS LIST</b>\n\n"
+            "No users are currently banned.",
             parse_mode="HTML"
         )
         return
 
-    total_banned = len(banned_users)
-    msg = (
-        f"<b>📋 BANNED USERS</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>📊 Total Banned:</b> {total_banned}\n\n"
-        f"<b>👤 User List:</b>\n"
+    keyboard = [[InlineKeyboardButton("List", callback_data="show_banned_list")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "<b>BANNED USERS LIST</b>",
+        parse_mode="HTML",
+        reply_markup=reply_markup
     )
-
-    for i, (ban_id, ban_data) in enumerate(banned_users.items(), 1):
-        username = ban_data.get('username')
-        banned_at = ban_data.get('banned_at', 'Unknown')
-        date_str = banned_at[:10] if len(banned_at) > 10 else banned_at
-        
-        if i == total_banned:
-            prefix = "└"
-        else:
-            prefix = "├"
-        
-        if username:
-            msg += f"{prefix} 🚫 @{username}\n"
-        else:
-            msg += f"{prefix} 🚫 ID: {ban_id}\n"
-        msg += f"    <i>📅 {date_str}</i>\n"
-
-    await update.message.reply_text(msg, parse_mode="HTML")
 
 
 async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
