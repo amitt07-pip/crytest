@@ -3520,7 +3520,7 @@ async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Free all rooms and kick all members from them."""
-    global userbot_client, deals, rooms
+    global userbot_client, deals, rooms, group_data
 
     user_id = update.effective_user.id
 
@@ -3554,6 +3554,11 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if str(deal.get('chat_id')) == full_channel_id:
                 del deals[deal_id]
                 log_info(f"Deal #{deal_id} removed (empty command)")
+
+        # Clear group_data entry so users can start new deals
+        if full_channel_id in group_data:
+            del group_data[full_channel_id]
+            log_info(f"Group data cleared for room {room_num} (empty command)")
 
         # Kick all members
         try:
@@ -3606,6 +3611,7 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         rooms_cleaned += 1
 
     save_deals()
+    save_group_data()
 
     await progress_msg.edit_text("All rooms have been emptied and are ready to use!")
 
