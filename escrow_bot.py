@@ -723,12 +723,13 @@ def build_deposit_message(deal, deal_id):
                     qr_image = SOL_QR_IMAGES[fixed_index]
                 elif network == "USDC_BSC" and fixed_index < len(USDC_BSC_QR_IMAGES):
                     qr_image = USDC_BSC_QR_IMAGES[fixed_index]
-                elif network == "USDC_POLYGON":
-                    qr_image = USDC_POLYGON_QR_IMAGE
-                elif network == "USDC_SOL":
-                    qr_image = USDC_SOL_QR_IMAGE
-                if qr_image:
-                    deal['qr_image'] = qr_image
+            # USDC_POLYGON and USDC_SOL have single addresses, no fixed_index needed
+            if network == "USDC_POLYGON":
+                qr_image = USDC_POLYGON_QR_IMAGE
+            elif network == "USDC_SOL":
+                qr_image = USDC_SOL_QR_IMAGE
+            if qr_image:
+                deal['qr_image'] = qr_image
     else:
         # Check if admin has pre-fixed an address index
         fixed_index = deal.get('fixed_address_index')
@@ -2607,11 +2608,12 @@ async def handle_message(
 
                 network_name = get_network_display_name(deal['network'])
                 seller = deal['seller']
+                currency = deal.get('currency', 'USDT')
 
                 seller_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
                     f"{seller} [Seller] please <b>QUOTE</b> this message "
-                    f"and reply with your <b>USDT {network_name}</b> address "
+                    f"and reply with your <b>{currency} {network_name}</b> address "
                     f"for a <b>REFUND</b> in case of a dispute.\n"
                     f"Please be mindful that funds <b>cannot be recovered</b> "
                     f"if sent to the wrong network address."
