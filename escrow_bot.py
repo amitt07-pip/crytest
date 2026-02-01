@@ -159,9 +159,16 @@ BLOCKCHAIN_APIS = {
     "SOL": "https://api.solscan.io"
 }
 
-# NodeReal public API for BSC (free, no API key required)
-# BSCScan API V1 is deprecated, using NodeReal as alternative
-NODEREAL_BSC_RPC = "https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3"
+# BSC RPC endpoints (with fallbacks)
+BSC_RPC_ENDPOINTS = [
+    "https://bsc-mainnet.nodereal.io/v1/64a9df0874fb4a93b9d0a3849de012d3",
+    "https://bsc-dataseed.binance.org/",
+    "https://bsc-dataseed1.binance.org/",
+    "https://bsc-dataseed2.binance.org/",
+    "https://bsc-dataseed3.binance.org/",
+    "https://bsc-dataseed4.binance.org/",
+]
+NODEREAL_BSC_RPC = BSC_RPC_ENDPOINTS[0]  # Primary endpoint
 
 # ERC20 Transfer event topic (keccak256 of "Transfer(address,address,uint256)")
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
@@ -885,109 +892,118 @@ def build_deal_summary(deal, deal_id, both_confirmed=False):
 
 
 async def check_bsc_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
-    """Check BSC blockchain for USDT transactions to deposit address using NodeReal RPC.
+    """Check BSC blockchain for USDT transactions to deposit address using RPC.
     
     Uses eth_getLogs to query ERC20 Transfer events to the deposit address.
-    NodeReal public API is free and doesn't require an API key.
+    Tries multiple RPC endpoints with timeouts for reliability.
     
     Args:
         monitoring_start_time: Unix timestamp when monitoring started. Only transactions
                               after this time will be considered.
     """
-    try:
-        async with aiohttp.ClientSession() as session:
-            # First get the latest block number
-            block_payload = {
-                "jsonrpc": "2.0",
-                "method": "eth_blockNumber",
-                "params": [],
-                "id": 1
-            }
-            async with session.post(
-                NODEREAL_BSC_RPC,
-                json=block_payload,
-                headers={"Content-Type": "application/json"}
-            ) as response:
-                if response.status != 200:
-                    log_error(f"BSC RPC error getting block number: {response.status}")
-                    return []
-                data = await response.json()
-                if "error" in data:
-                    log_error(f"BSC RPC error: {data['error']}")
-                    return []
-                latest_block = int(data["result"], 16)
-            
-            # Calculate from_block based on monitoring_start_time
-            # BSC has ~3 second block time
-            if monitoring_start_time:
-                seconds_ago = int(time.time()) - monitoring_start_time
-                blocks_ago = max(10, seconds_ago // 3 + 100)  # Add 100 blocks buffer
-                from_block = hex(latest_block - blocks_ago)
-            else:
-                # Fallback: Query last 10000 blocks (~8 hours on BSC with 3s block time)
-                from_block = hex(latest_block - 10000)
-            
-            # Pad deposit address to 32 bytes for topic filter
-            padded_address = "0x" + deposit_address[2:].lower().zfill(64)
-            
-            # Query for Transfer events TO the deposit address
-            logs_payload = {
-                "jsonrpc": "2.0",
-                "method": "eth_getLogs",
-                "params": [{
-                    "fromBlock": from_block,
-                    "toBlock": "latest",
-                    "address": usdt_contract,
-                    "topics": [
-                        TRANSFER_EVENT_TOPIC,
-                        None,  # from address (any)
-                        padded_address  # to address (our deposit address)
-                    ]
-                }],
-                "id": 2
-            }
-            
-            async with session.post(
-                NODEREAL_BSC_RPC,
-                json=logs_payload,
-                headers={"Content-Type": "application/json"}
-            ) as response:
-                if response.status != 200:
-                    log_error(f"BSC RPC error getting logs: {response.status}")
-                    return []
-                data = await response.json()
-                if "error" in data:
-                    log_error(f"BSC RPC error: {data['error']}")
-                    return []
+    timeout = aiohttp.ClientTimeout(total=15)  # 15 second timeout
+    
+    for rpc_endpoint in BSC_RPC_ENDPOINTS:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                # First get the latest block number
+                block_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",
+                    "params": [],
+                    "id": 1
+                }
+                async with session.post(
+                    rpc_endpoint,
+                    json=block_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(f"BSC RPC {rpc_endpoint} error getting block number: {response.status}")
+                        continue  # Try next endpoint
+                    data = await response.json()
+                    if "error" in data:
+                        log_warning(f"BSC RPC {rpc_endpoint} error: {data['error']}")
+                        continue  # Try next endpoint
+                    latest_block = int(data["result"], 16)
                 
-                logs = data.get("result", [])
-                if logs:
-                    log_info(f"BSC RPC found {len(logs)} transactions for {deposit_address[:6]}...")
-                    # Convert logs to a format similar to BSCScan API response
-                    transactions = []
-                    for log in logs:
-                        # Extract amount from data (uint256)
-                        amount_hex = log.get("data", "0x0")
-                        amount_wei = int(amount_hex, 16) if amount_hex else 0
-                        # USDT/USDC on BSC has 18 decimals
-                        amount = amount_wei / (10 ** 18)
-                        
-                        # Extract from address from topics[1]
-                        from_addr = "0x" + log["topics"][1][-40:] if len(log.get("topics", [])) > 1 else ""
-                        
-                        transactions.append({
-                            "hash": log.get("transactionHash", ""),
-                            "from": from_addr,
-                            "to": deposit_address,
-                            "value": str(amount_wei),
-                            "tokenDecimal": "18",
-                            "blockNumber": str(int(log.get("blockNumber", "0x0"), 16))
-                        })
-                    return transactions
-                return []
-    except Exception as e:
-        log_error(f"BSC RPC error: {e}")
-        return []
+                # Calculate from_block based on monitoring_start_time
+                # BSC has ~3 second block time
+                if monitoring_start_time:
+                    seconds_ago = int(time.time()) - monitoring_start_time
+                    blocks_ago = max(10, seconds_ago // 3 + 100)  # Add 100 blocks buffer
+                    from_block = hex(latest_block - blocks_ago)
+                else:
+                    # Fallback: Query last 10000 blocks (~8 hours on BSC with 3s block time)
+                    from_block = hex(latest_block - 10000)
+                
+                # Pad deposit address to 32 bytes for topic filter
+                padded_address = "0x" + deposit_address[2:].lower().zfill(64)
+                
+                # Query for Transfer events TO the deposit address
+                logs_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_getLogs",
+                    "params": [{
+                        "fromBlock": from_block,
+                        "toBlock": "latest",
+                        "address": usdt_contract,
+                        "topics": [
+                            TRANSFER_EVENT_TOPIC,
+                            None,  # from address (any)
+                            padded_address  # to address (our deposit address)
+                        ]
+                    }],
+                    "id": 2
+                }
+                
+                async with session.post(
+                    rpc_endpoint,
+                    json=logs_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(f"BSC RPC {rpc_endpoint} error getting logs: {response.status}")
+                        continue  # Try next endpoint
+                    data = await response.json()
+                    if "error" in data:
+                        log_warning(f"BSC RPC {rpc_endpoint} error: {data['error']}")
+                        continue  # Try next endpoint
+                    
+                    logs = data.get("result", [])
+                    if logs:
+                        log_info(f"BSC RPC found {len(logs)} transactions for {deposit_address[:6]}...")
+                        # Convert logs to a format similar to BSCScan API response
+                        transactions = []
+                        for log in logs:
+                            # Extract amount from data (uint256)
+                            amount_hex = log.get("data", "0x0")
+                            amount_wei = int(amount_hex, 16) if amount_hex else 0
+                            # USDT/USDC on BSC has 18 decimals
+                            amount = amount_wei / (10 ** 18)
+                            
+                            # Extract from address from topics[1]
+                            from_addr = "0x" + log["topics"][1][-40:] if len(log.get("topics", [])) > 1 else ""
+                            
+                            transactions.append({
+                                "hash": log.get("transactionHash", ""),
+                                "from": from_addr,
+                                "to": deposit_address,
+                                "value": str(amount_wei),
+                                "tokenDecimal": "18",
+                                "blockNumber": str(int(log.get("blockNumber", "0x0"), 16))
+                            })
+                        return transactions
+                    return []  # Successfully queried but no transactions found
+        except asyncio.TimeoutError:
+            log_warning(f"BSC RPC {rpc_endpoint} timeout")
+            continue  # Try next endpoint
+        except Exception as e:
+            log_warning(f"BSC RPC {rpc_endpoint} error: {e}")
+            continue  # Try next endpoint
+    
+    log_error("All BSC RPC endpoints failed")
+    return []
 
 
 async def check_polygon_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
