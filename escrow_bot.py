@@ -3172,13 +3172,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"<b>Crypto India Escrow Room {room_num}</b>. "
         f"Please use the following link to join the room:\n\n"
         f"{invite_link}\n\n"
-        f"⚠️ Scammers may invite you at some parallel fake escrow room. "
-        f"Always double check the correct one by using the above link. "
-        f"Please deposit USDT / USDC only when the bot prompts you to do so. "
-        f"Do not send anything in advance to avoid issues. "
-        f"Always verify the deposit address provided by Bot with the ones "
-        f"mentioned @ <a href=\"{ESCROW_ADDRESSES_LINK}\">"
-        f"List of Escrow Addresses</a>."
+        f"🚫 <b>Beware of Scammers</b> 🚫\n\n"
+        f"Read <a href=\"https://t.me/c/3446573761/3299/3424\">Important Safety Tips</a>."
     )
 
     sent_msg = await context.bot.send_message(
