@@ -3169,7 +3169,7 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     message = (
         f"{mentioned_user} & {sender_username} are requested to join "
-        f"<b>Crypto India Escrow Room {room_num}</b>. "
+        f"<b>Crypto India Escrow Room {room_num}</b>... "
         f"Please use the following link to join the room:\n\n"
         f"{invite_link}\n\n"
         f"🚫 <b>Beware of Scammers</b> 🚫\n\n"
