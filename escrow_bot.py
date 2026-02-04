@@ -3447,6 +3447,78 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cleaned!")
 
 
+async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manually mark a deal as completed. Triggered by .complete command."""
+    global group_data
+    
+    user_id = update.effective_user.id
+    
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+    
+    chat_id = update.effective_chat.id
+    full_channel_id = str(chat_id)
+    
+    room_num = get_room_by_channel_id(chat_id)
+    
+    if full_channel_id not in group_data:
+        await update.message.reply_text("No active deal found in this group.")
+        return
+    
+    gdata = group_data[full_channel_id]
+    escrow_msg_id = gdata.get("escrow_message_id")
+    escrow_chat_id = gdata.get("escrow_chat_id")
+    mentioned_user = gdata.get("mentioned_user", "")
+    sender_user = gdata.get("sender_user", "")
+    sender_user_id = gdata.get("sender_user_id", "")
+    mentioned_user_id = gdata.get("mentioned_user_id", "")
+    room_number = gdata.get("room_number", room_num or "")
+    
+    if not escrow_msg_id or not escrow_chat_id:
+        await update.message.reply_text("Could not find the original escrow message.")
+        return
+    
+    # Calculate duration from deal start (form submission) to now
+    import time as time_module
+    start_time = gdata.get("deal_start_time", 0)
+    current_time = time_module.time()
+    
+    if start_time == 0:
+        duration_str = "N/A"
+    else:
+        duration_seconds = int(current_time - start_time)
+        hours = duration_seconds // 3600
+        minutes = (duration_seconds % 3600) // 60
+        seconds = duration_seconds % 60
+        
+        if hours > 0:
+            duration_str = f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            duration_str = f"{minutes}m {seconds}s"
+        else:
+            duration_str = f"{seconds}s"
+    
+    complete_msg = (
+        f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
+        f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
+        f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
+        f"🕗 Completed in {duration_str}"
+    )
+    
+    try:
+        await context.bot.edit_message_text(
+            chat_id=escrow_chat_id,
+            message_id=escrow_msg_id,
+            text=complete_msg,
+            parse_mode="HTML"
+        )
+        await update.message.reply_text("Deal marked as completed!")
+    except Exception as e:
+        log_warning(f"Could not edit escrow message: {e}")
+        await update.message.reply_text(f"Error: Could not edit escrow message.")
+
+
 async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display professional status of all rooms."""
     user_id = update.effective_user.id
@@ -4180,7 +4252,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .ban @user - Ban user from bot\n"
         "├ .unban @user - Unban from bot\n"
         "├ .gunban @user - Unban from all groups\n"
-        "└ .banned - List banned users"
+        "├ .banned - List banned users\n"
+        "└ .complete - Mark deal as completed"
     )
 
     await update.message.reply_text(msg, parse_mode="HTML")
@@ -4230,6 +4303,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
