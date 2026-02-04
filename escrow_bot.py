@@ -3308,10 +3308,12 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     room_num = get_room_by_channel_id(chat_id)
 
-    # Check if deal was completed (payment released)
+    # Check if deal was completed (payment released or manually completed via .complete)
     deal_completed = False
+    manually_completed = False
     if full_channel_id in group_data:
         deal_completed = group_data[full_channel_id].get("deal_completed", False)
+        manually_completed = group_data[full_channel_id].get("manually_completed", False)
 
     # Check if deposit was detected (deal exists with deposit status)
     deposit_detected = False
@@ -3332,8 +3334,15 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_user_id = gdata.get("mentioned_user_id", "")
         room_number = gdata.get("room_number", room_num or "")
 
+        # Format user info - only show ID if available
+        mentioned_info = f"{mentioned_user} ({mentioned_user_id})" if mentioned_user_id else mentioned_user
+        sender_info = f"{sender_user} ({sender_user_id})" if sender_user_id else sender_user
+        
         if escrow_msg_id and escrow_chat_id:
-            if deal_completed:
+            # Skip editing if manually completed via .complete (message already edited)
+            if manually_completed:
+                pass  # Don't edit, .complete already set the message
+            elif deal_completed:
                 # Calculate duration from form submission to release
                 import time as time_module
                 start_time = gdata.get("deal_start_time", 0)
@@ -3353,7 +3362,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 complete_msg = (
                     f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
-                    f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
+                    f"{mentioned_info} & {sender_info} "
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
                     f"🕗 Completed in {duration_str}"
                 )
@@ -3370,7 +3379,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Deal cancelled - no deposit detected
                 cancel_msg = (
                     f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
-                    f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
+                    f"{mentioned_info} & {sender_info} "
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
                 )
                 try:
@@ -3499,12 +3508,20 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             duration_str = f"{seconds}s"
     
+    # Format user info - only show ID if available
+    mentioned_info = f"{mentioned_user} ({mentioned_user_id})" if mentioned_user_id else mentioned_user
+    sender_info = f"{sender_user} ({sender_user_id})" if sender_user_id else sender_user
+    
     complete_msg = (
         f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
-        f"{mentioned_user} ({mentioned_user_id}) & {sender_user} ({sender_user_id}) "
+        f"{mentioned_info} & {sender_info} "
         f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
         f"🕗 Completed in {duration_str}"
     )
+    
+    # Mark as manually completed so /clean doesn't overwrite with cancelled
+    group_data[full_channel_id]["manually_completed"] = True
+    save_group_data()
     
     try:
         await context.bot.edit_message_text(
