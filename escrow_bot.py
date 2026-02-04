@@ -3161,7 +3161,9 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "joined_users": [],
         "mentioned_user": mentioned_user,
         "sender_user": sender_username,
-        "room_number": room_num
+        "room_number": room_num,
+        "sender_user_id": user_id,
+        "mentioned_user_id": mentioned_user_id
     }
     save_group_data()
 
@@ -3187,7 +3189,6 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Store the escrow message info for editing on /clean
     group_data[full_channel_id]["escrow_message_id"] = sent_msg.message_id
     group_data[full_channel_id]["escrow_chat_id"] = chat_id
-    group_data[full_channel_id]["sender_user_id"] = user_id
     save_group_data()
 
 
