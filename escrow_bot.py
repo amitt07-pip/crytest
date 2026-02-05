@@ -3362,8 +3362,9 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     duration_str = f"{seconds}s"
                 
                 complete_msg = (
-                    f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
-                    f"{mentioned_info} & {sender_info} "
+                    f"🟢 <b>Status</b>: Deal <b>Completed</b> between\n"
+                    f"{mentioned_info} &\n"
+                    f"{sender_info}\n"
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
                     f"🕗 Completed in {duration_str}"
                 )
@@ -3379,8 +3380,9 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif not deposit_detected:
                 # Deal cancelled - no deposit detected
                 cancel_msg = (
-                    f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between "
-                    f"{mentioned_info} & {sender_info} "
+                    f"🔴 <b>Status</b>: Deal <b>Cancelled</b> between\n"
+                    f"{mentioned_info} &\n"
+                    f"{sender_info}\n"
                     f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>"
                 )
                 try:
@@ -3514,8 +3516,9 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     sender_info = f"{sender_user} (<code>{sender_user_id}</code>)" if sender_user_id else sender_user
     
     complete_msg = (
-        f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
-        f"{mentioned_info} & {sender_info} "
+        f"🟢 <b>Status</b>: Deal <b>Completed</b> between\n"
+        f"{mentioned_info} &\n"
+        f"{sender_info}\n"
         f"<b>@CryptoIndiaUnited Escrow Room {room_number}</b>\n"
         f"🕗 Completed in {duration_str}"
     )
