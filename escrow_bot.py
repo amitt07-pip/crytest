@@ -1669,8 +1669,8 @@ async def handle_callback(
                 code = user_2fa[str(user_id)].get("code", "")
                 await query.answer(code, show_alert=True)
             else:
-                # No response if user hasn't set 2FA
-                await query.answer()
+                # Show error popup if user hasn't set 2FA
+                await query.answer("Something went wrong, please try again later!", show_alert=True)
         return
 
     # Handle 2FA verification callback - grant message permission
