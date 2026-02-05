@@ -3335,9 +3335,9 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_user_id = gdata.get("mentioned_user_id", "")
         room_number = gdata.get("room_number", room_num or "")
 
-        # Format user info - only show ID if available
-        mentioned_info = f"{mentioned_user} ({mentioned_user_id})" if mentioned_user_id else mentioned_user
-        sender_info = f"{sender_user} ({sender_user_id})" if sender_user_id else sender_user
+        # Format user info - only show ID if available (in monospace)
+        mentioned_info = f"{mentioned_user} (<code>{mentioned_user_id}</code>)" if mentioned_user_id else mentioned_user
+        sender_info = f"{sender_user} (<code>{sender_user_id}</code>)" if sender_user_id else sender_user
         
         if escrow_msg_id and escrow_chat_id:
             # Skip editing if manually completed via .complete (message already edited)
@@ -3509,9 +3509,9 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             duration_str = f"{seconds}s"
     
-    # Format user info - only show ID if available
-    mentioned_info = f"{mentioned_user} ({mentioned_user_id})" if mentioned_user_id else mentioned_user
-    sender_info = f"{sender_user} ({sender_user_id})" if sender_user_id else sender_user
+    # Format user info - only show ID if available (in monospace)
+    mentioned_info = f"{mentioned_user} (<code>{mentioned_user_id}</code>)" if mentioned_user_id else mentioned_user
+    sender_info = f"{sender_user} (<code>{sender_user_id}</code>)" if sender_user_id else sender_user
     
     complete_msg = (
         f"🟢 <b>Status</b>: Deal <b>Completed</b> between "
