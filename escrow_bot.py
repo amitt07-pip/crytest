@@ -375,6 +375,33 @@ async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Star
         return None
 
 
+async def send_initial_deal_log(bot, room_num, initiator, counterparty, channel_id):
+    """Send initial deal log when both users join the escrow room."""
+    try:
+        msg = (
+            f"<b>ESCROW ROOM {room_num}</b>\n\n"
+            f"• <b>Initiator ({initiator}) Status</b> - Joined\n"
+            f"• <b>CounterParty ({counterparty}) Status</b> - Joined\n"
+            f"• <b>Deal Amount[N/A]</b> - N/A\n"
+            f"• <b>Deal Status</b> - Both Users Joined"
+        )
+        sent_msg = await bot.send_message(
+            chat_id=DEAL_LOG_CHANNEL_ID,
+            text=msg,
+            parse_mode="HTML"
+        )
+        # Store the log message ID in group_data for future updates
+        full_channel_id = f"-100{channel_id}" if not str(channel_id).startswith("-100") else str(channel_id)
+        if full_channel_id in group_data:
+            group_data[full_channel_id]['log_message_id'] = sent_msg.message_id
+            save_group_data()
+        log_info(f"Initial deal log sent for room {room_num}")
+        return sent_msg.message_id
+    except Exception as e:
+        log_error(f"Failed to send initial deal log: {e}")
+        return None
+
+
 async def update_deal_log(bot, deal_id, status):
     """Update the deal log message with new status."""
     try:
@@ -2920,8 +2947,12 @@ async def handle_message(
         seller = form_data['seller']
         buyer = form_data['buyer']
 
-        # Send deal log to log channel
-        await send_deal_log(context.bot, deal_id, buyer, seller, room_num, "Deal Started", None, amount_crypto, escrow_sender)
+        # Transfer log_message_id from group_data to deal and update the log
+        if full_channel_id in group_data and group_data[full_channel_id].get('log_message_id'):
+            deals[deal_id]['log_message_id'] = group_data[full_channel_id]['log_message_id']
+            save_deals()
+            # Update the existing log message with deal info
+            await update_deal_log(context.bot, deal_id, "Deal Started")
 
         msg = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
@@ -3086,8 +3117,13 @@ async def handle_join_request(
                     await asyncio.sleep(2)
                     await send_2fa_welcome_message(context, chat_id, username, user_id)
 
-                    # Send form messages when second user joins
+                    # Send form messages and deal log when second user joins
                     if joined_count == 2:
+                        # Send initial deal log to log channel
+                        room_num = group_data[chat_id].get("room_number", "N/A")
+                        channel_id = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
+                        await send_initial_deal_log(context.bot, room_num, sender, mentioned, channel_id)
+                        
                         await asyncio.sleep(1)
                         await send_form_messages(context, chat_id, mentioned, sender)
         else:
