@@ -329,7 +329,7 @@ def truncate_address(address):
     return f"{address[:3]}...{address[-4:]}"
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False, mentioned_user=None):
     """Build the deal log message for the log channel."""
     # Format token display (e.g., USDT/USDC)
     token_display = token if token else "N/A"
@@ -337,9 +337,11 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
     # Format amount display
     amount_display = amount if amount else "N/A"
     
-    # Determine initiator and counterparty (escrow_sender is initiator)
+    # Determine initiator and counterparty
+    # escrow_sender is always the initiator (person who used /escrow)
+    # mentioned_user is always the counterparty (person mentioned in /escrow @username)
     initiator = escrow_sender if escrow_sender else buyer
-    counterparty = seller if escrow_sender else seller
+    counterparty = mentioned_user if mentioned_user else seller
     
     # Join status indicators
     initiator_status = "Joined" if initiator_joined else "Not Joined"
@@ -355,10 +357,10 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
     return msg
 
 
-async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started", token=None, amount=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False):
+async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started", token=None, amount=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False, mentioned_user=None):
     """Send initial deal log message to the log channel."""
     try:
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, None, amount, token, escrow_sender, initiator_joined, counterparty_joined)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, None, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user)
         sent_msg = await bot.send_message(
             chat_id=DEAL_LOG_CHANNEL_ID,
             text=msg,
@@ -482,6 +484,9 @@ async def update_deal_log(bot, deal_id, status):
         initiator_joined = deal.get('initiator_joined', False)
         counterparty_joined = deal.get('counterparty_joined', False)
         
+        # Get mentioned_user (counterparty) from deal or group_data
+        mentioned_user = deal.get('mentioned_user', '')
+        
         # Try to get join status from group_data if available
         channel_id = deal.get('channel_id')
         if channel_id:
@@ -489,13 +494,14 @@ async def update_deal_log(bot, deal_id, status):
             if full_channel_id in group_data:
                 joined_users = group_data[full_channel_id].get('joined_users', [])
                 sender_clean = escrow_sender.lstrip("@").lower() if escrow_sender else ""
-                mentioned_user = group_data[full_channel_id].get('mentioned_user', '')
+                if not mentioned_user:
+                    mentioned_user = group_data[full_channel_id].get('mentioned_user', '')
                 mentioned_clean = mentioned_user.lstrip("@").lower() if mentioned_user else ""
                 
                 initiator_joined = sender_clean in [u.lower() for u in joined_users]
                 counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
@@ -1836,6 +1842,14 @@ async def handle_callback(
     user_id = user.id
     username = user.username.lower() if user.username else None
 
+    # Handle review fix callbacks (admin only)
+    if data.startswith("review_"):
+        if user_id not in ADMIN_USER_IDS:
+            await query.answer("Admin only!")
+            return
+        await handle_review_fix(query, data)
+        return
+
     # Handle 2FA check callback - show user's 2FA code as popup
     if data.startswith("check2fa_"):
         parts = data.split("_")
@@ -2950,11 +2964,13 @@ async def handle_message(
 
         import time as time_module
         
-        # Get escrow sender username from group_data
+        # Get escrow sender username and mentioned_user from group_data
         full_channel_id = str(chat_id)
         escrow_sender = None
+        escrow_mentioned_user = None
         if full_channel_id in group_data:
             escrow_sender = group_data[full_channel_id].get('sender_user')
+            escrow_mentioned_user = group_data[full_channel_id].get('mentioned_user')
         
         # Determine fixed address index based on room number
         # Odd rooms (1,3,5,7,9,11,13,15,17,19) use Address 1 (index 0)
@@ -2994,7 +3010,7 @@ async def handle_message(
             'buyer_address_msg_id': None,
             'seller_address_msg_id': None,
             'room_number': room_num,
-            'mentioned_user': form_data['buyer'],
+            'mentioned_user': escrow_mentioned_user,
             'sender_user': escrow_sender,
             'form_submitted_at': time_module.time(),
             'fixed_address_index': fixed_address_index
@@ -4506,10 +4522,248 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .unban @user - Unban from bot\n"
         "├ .gunban @user - Unban from all groups\n"
         "├ .banned - List banned users\n"
-        "└ .complete - Mark deal as completed"
+        "├ .complete - Mark deal as completed\n"
+        "└ .review - Scan rooms for issues"
     )
 
     await update.message.reply_text(msg, parse_mode="HTML")
+
+
+async def review_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to scan all rooms for assignment issues."""
+    global userbot_client
+    
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+    
+    if userbot_client is None:
+        await init_userbot()
+    
+    await update.message.reply_text(
+        "<b>🔍 SCANNING ROOMS...</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Please wait while I check all rooms for issues...",
+        parse_mode="HTML"
+    )
+    
+    issues = []
+    
+    for room_num, room_data in rooms.items():
+        room_status = room_data.get('status', 'unknown')
+        channel_id = room_data.get('channel_id')
+        full_channel_id = f"-100{channel_id}" if channel_id else None
+        
+        group_exists = False
+        if channel_id and userbot_client:
+            try:
+                entity = await userbot_client.get_entity(int(f"-100{channel_id}"))
+                group_exists = True
+            except Exception:
+                group_exists = False
+        
+        has_group_data = full_channel_id in group_data if full_channel_id else False
+        has_active_deal = False
+        active_deal_id = None
+        
+        for deal_id, deal in deals.items():
+            deal_channel = deal.get('channel_id')
+            if deal_channel and str(deal_channel) == str(channel_id):
+                deal_status = deal.get('status', '')
+                if deal_status not in ['completed', 'cancelled']:
+                    has_active_deal = True
+                    active_deal_id = deal_id
+                    break
+        
+        if not group_exists and channel_id:
+            issues.append({
+                'room': room_num,
+                'type': 'deleted_group',
+                'description': f"Room {room_num}: Telegram group deleted but room still exists in config",
+                'fix_action': f"fix_deleted_{room_num}"
+            })
+        
+        if room_status == 'busy' and not has_active_deal and not has_group_data:
+            issues.append({
+                'room': room_num,
+                'type': 'busy_no_deal',
+                'description': f"Room {room_num}: Marked as busy but no active deal or group data",
+                'fix_action': f"fix_busy_{room_num}"
+            })
+        
+        if room_status == 'free' and has_active_deal:
+            issues.append({
+                'room': room_num,
+                'type': 'free_with_deal',
+                'description': f"Room {room_num}: Marked as free but has active deal #{active_deal_id}",
+                'fix_action': f"fix_free_{room_num}_{active_deal_id}"
+            })
+        
+        if has_group_data and room_status == 'free':
+            gd = group_data.get(full_channel_id, {})
+            if gd.get('joined_users') or gd.get('sender_user'):
+                issues.append({
+                    'room': room_num,
+                    'type': 'stale_group_data',
+                    'description': f"Room {room_num}: Has stale group_data but room is free",
+                    'fix_action': f"fix_stale_{room_num}"
+                })
+    
+    if not issues:
+        await update.message.reply_text(
+            "<b>✅ ROOM REVIEW COMPLETE</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "No issues found! All rooms are properly configured.",
+            parse_mode="HTML"
+        )
+        return
+    
+    msg = (
+        f"<b>⚠️ ROOM REVIEW COMPLETE</b>\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"<b>Found {len(issues)} issue(s):</b>\n\n"
+    )
+    
+    keyboard = []
+    for i, issue in enumerate(issues):
+        msg += f"{i+1}. {issue['description']}\n\n"
+        keyboard.append([InlineKeyboardButton(
+            f"🔧 Fix Room {issue['room']}",
+            callback_data=f"review_{issue['fix_action']}"
+        )])
+    
+    keyboard.append([InlineKeyboardButton("🔧 Fix All Issues", callback_data="review_fix_all")])
+    
+    await update.message.reply_text(
+        msg,
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def handle_review_fix(query, callback_data):
+    """Handle fix buttons from .review command."""
+    global rooms, group_data, deals
+    
+    action = callback_data.replace("review_", "")
+    
+    if action == "fix_all":
+        fixed_count = 0
+        for room_num, room_data in list(rooms.items()):
+            room_status = room_data.get('status', 'unknown')
+            channel_id = room_data.get('channel_id')
+            full_channel_id = f"-100{channel_id}" if channel_id else None
+            
+            has_group_data = full_channel_id in group_data if full_channel_id else False
+            has_active_deal = False
+            
+            for deal_id, deal in deals.items():
+                deal_channel = deal.get('channel_id')
+                if deal_channel and str(deal_channel) == str(channel_id):
+                    deal_status = deal.get('status', '')
+                    if deal_status not in ['completed', 'cancelled']:
+                        has_active_deal = True
+                        break
+            
+            if room_status == 'busy' and not has_active_deal and not has_group_data:
+                rooms[room_num]['status'] = 'free'
+                rooms[room_num]['sender_user'] = None
+                rooms[room_num]['mentioned_user'] = None
+                rooms[room_num]['current_deal_id'] = None
+                fixed_count += 1
+            
+            if room_status == 'free' and has_group_data:
+                if full_channel_id in group_data:
+                    del group_data[full_channel_id]
+                    fixed_count += 1
+        
+        save_rooms()
+        save_group_data()
+        
+        await query.edit_message_text(
+            f"<b>✅ FIXES APPLIED</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Fixed {fixed_count} issue(s).\n\n"
+            f"Run <code>.review</code> again to verify.",
+            parse_mode="HTML"
+        )
+        return
+    
+    if action.startswith("fix_busy_"):
+        room_num = action.replace("fix_busy_", "")
+        if room_num in rooms:
+            rooms[room_num]['status'] = 'free'
+            rooms[room_num]['sender_user'] = None
+            rooms[room_num]['mentioned_user'] = None
+            rooms[room_num]['current_deal_id'] = None
+            save_rooms()
+            
+            channel_id = rooms[room_num].get('channel_id')
+            full_channel_id = f"-100{channel_id}" if channel_id else None
+            if full_channel_id and full_channel_id in group_data:
+                del group_data[full_channel_id]
+                save_group_data()
+            
+            await query.edit_message_text(
+                f"<b>✅ FIXED</b>\n\n"
+                f"Room {room_num} has been marked as free.",
+                parse_mode="HTML"
+            )
+        return
+    
+    if action.startswith("fix_stale_"):
+        room_num = action.replace("fix_stale_", "")
+        if room_num in rooms:
+            channel_id = rooms[room_num].get('channel_id')
+            full_channel_id = f"-100{channel_id}" if channel_id else None
+            if full_channel_id and full_channel_id in group_data:
+                del group_data[full_channel_id]
+                save_group_data()
+            
+            await query.edit_message_text(
+                f"<b>✅ FIXED</b>\n\n"
+                f"Stale group_data for Room {room_num} has been cleared.",
+                parse_mode="HTML"
+            )
+        return
+    
+    if action.startswith("fix_free_"):
+        parts = action.replace("fix_free_", "").split("_")
+        room_num = parts[0]
+        deal_id = parts[1] if len(parts) > 1 else None
+        
+        if room_num in rooms:
+            rooms[room_num]['status'] = 'busy'
+            if deal_id:
+                rooms[room_num]['current_deal_id'] = deal_id
+            save_rooms()
+            
+            await query.edit_message_text(
+                f"<b>✅ FIXED</b>\n\n"
+                f"Room {room_num} has been marked as busy.",
+                parse_mode="HTML"
+            )
+        return
+    
+    if action.startswith("fix_deleted_"):
+        room_num = action.replace("fix_deleted_", "")
+        if room_num in rooms:
+            rooms[room_num]['status'] = 'free'
+            rooms[room_num]['channel_id'] = None
+            rooms[room_num]['invite_link'] = None
+            rooms[room_num]['sender_user'] = None
+            rooms[room_num]['mentioned_user'] = None
+            rooms[room_num]['current_deal_id'] = None
+            save_rooms()
+            
+            await query.edit_message_text(
+                f"<b>✅ FIXED</b>\n\n"
+                f"Room {room_num} config cleared. Run <code>.setup_rooms</code> to recreate.",
+                parse_mode="HTML"
+            )
+        return
+    
+    await query.answer("Unknown fix action")
 
 
 async def main():
@@ -4557,6 +4811,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
