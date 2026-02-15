@@ -3606,14 +3606,15 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 
                 # Also edit the deal log message to show cancelled
                 log_message_id = None
-                # First try to get log_message_id from deals
-                for deal_id, deal in deals.items():
-                    if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
-                        log_message_id = deal.get('log_message_id')
-                        break
-                # If not found in deals, try group_data (for deals cancelled before form submission)
-                if not log_message_id and full_channel_id in group_data:
+                # First try to get log_message_id from group_data (always has current deal's log)
+                if full_channel_id in group_data:
                     log_message_id = group_data[full_channel_id].get('log_message_id')
+                # If not found in group_data, try the most recent deal
+                if not log_message_id:
+                    for deal_id, deal in deals.items():
+                        if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
+                            if deal.get('log_message_id'):
+                                log_message_id = deal.get('log_message_id')
                 
                 if log_message_id:
                     try:
