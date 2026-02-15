@@ -3410,6 +3410,22 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
                 except Exception as e:
                     log_warning(f"Could not edit escrow message: {e}")
+                
+                # Also edit the deal log message to show cancelled
+                for deal_id, deal in deals.items():
+                    if deal.get('channel_id') == chat_id:
+                        log_message_id = deal.get('log_message_id')
+                        if log_message_id:
+                            try:
+                                await context.bot.edit_message_text(
+                                    chat_id=DEAL_LOG_CHANNEL_ID,
+                                    message_id=log_message_id,
+                                    text="<b>Deal Cancelled !!</b>",
+                                    parse_mode="HTML"
+                                )
+                            except Exception as e:
+                                log_warning(f"Could not edit deal log message: {e}")
+                        break
 
     for deal_id, deal in list(deals.items()):
         if deal.get('channel_id') == chat_id:
