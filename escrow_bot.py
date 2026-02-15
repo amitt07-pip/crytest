@@ -320,33 +320,36 @@ def truncate_address(address):
     return f"{address[:3]}...{address[-4:]}"
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False):
     """Build the deal log message for the log channel."""
-    # Format token display (e.g., USDT-BSC)
+    # Format token display (e.g., USDT/USDC)
     token_display = token if token else "N/A"
     
     # Format amount display
     amount_display = amount if amount else "N/A"
     
-    # Get escrow sender username for header
-    sender_display = escrow_sender if escrow_sender else "N/A"
+    # Determine initiator and counterparty (escrow_sender is initiator)
+    initiator = escrow_sender if escrow_sender else buyer
+    counterparty = seller if escrow_sender else seller
+    
+    # Join status indicators
+    initiator_status = "Joined" if initiator_joined else "Not Joined"
+    counterparty_status = "Joined" if counterparty_joined else "Not Joined"
     
     msg = (
-        f"<b>ESCROW ROOM {room_num} OCCUPIED BY {sender_display}</b>\n\n"
-        f"<b>Room:</b> Room {room_num}\n"
-        f"<b>Buyer:</b> {buyer}\n"
-        f"<b>Seller:</b> {seller}\n"
-        f"<b>Token:</b> {token_display}\n"
-        f"<b>Amount:</b> {amount_display}\n"
-        f"<b>Status:</b> {status}"
+        f"<b>ESCROW ROOM {room_num}</b>\n\n"
+        f"• <b>Initiator ({initiator}) Status</b> - {initiator_status}\n"
+        f"• <b>CounterParty ({counterparty}) Status</b> - {counterparty_status}\n"
+        f"• <b>Deal Amount[{token_display}]</b> - {amount_display}\n"
+        f"• <b>Deal Status</b> - {status}"
     )
     return msg
 
 
-async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started", token=None, amount=None, escrow_sender=None):
+async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Started", token=None, amount=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False):
     """Send initial deal log message to the log channel."""
     try:
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, None, amount, token, escrow_sender)
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, None, amount, token, escrow_sender, initiator_joined, counterparty_joined)
         sent_msg = await bot.send_message(
             chat_id=DEAL_LOG_CHANNEL_ID,
             text=msg,
@@ -385,15 +388,28 @@ async def update_deal_log(bot, deal_id, status):
         # Get deal amount (USDT or USDC) - just the number
         amount = deal.get('amount_usdt') or deal.get('amount_usdc')
         
-        # Build token display (e.g., USDT-BSC)
+        # Build token display (e.g., USDT/USDC)
         currency = deal.get('currency', 'USDT')
-        network = deal.get('network', '')
-        if network:
-            token = f"{currency}-{network.upper()}"
-        else:
-            token = currency
+        token = currency
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender)
+        # Get join status from deal or group_data
+        initiator_joined = deal.get('initiator_joined', False)
+        counterparty_joined = deal.get('counterparty_joined', False)
+        
+        # Try to get join status from group_data if available
+        channel_id = deal.get('channel_id')
+        if channel_id:
+            full_channel_id = f"-100{channel_id}" if not str(channel_id).startswith("-100") else str(channel_id)
+            if full_channel_id in group_data:
+                joined_users = group_data[full_channel_id].get('joined_users', [])
+                sender_clean = escrow_sender.lstrip("@").lower() if escrow_sender else ""
+                mentioned_user = group_data[full_channel_id].get('mentioned_user', '')
+                mentioned_clean = mentioned_user.lstrip("@").lower() if mentioned_user else ""
+                
+                initiator_joined = sender_clean in [u.lower() for u in joined_users]
+                counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
+        
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
