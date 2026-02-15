@@ -375,15 +375,25 @@ async def send_deal_log(bot, deal_id, buyer, seller, room_num, status="Deal Star
         return None
 
 
-async def send_initial_deal_log(bot, room_num, initiator, counterparty, channel_id):
-    """Send initial deal log when both users join the escrow room."""
+async def send_initial_deal_log(bot, room_num, initiator, counterparty, channel_id, initiator_joined=False, counterparty_joined=False):
+    """Send initial deal log when /escrow command is used."""
     try:
+        initiator_status = "Joined" if initiator_joined else "Not Joined"
+        counterparty_status = "Joined" if counterparty_joined else "Not Joined"
+        
+        if initiator_joined and counterparty_joined:
+            deal_status = "Both Users Joined"
+        elif initiator_joined or counterparty_joined:
+            deal_status = "Waiting for Users"
+        else:
+            deal_status = "Room Assigned"
+        
         msg = (
             f"<b>ESCROW ROOM {room_num}</b>\n\n"
-            f"• <b>Initiator ({initiator}) Status</b> - Joined\n"
-            f"• <b>CounterParty ({counterparty}) Status</b> - Joined\n"
+            f"• <b>Initiator ({initiator}) Status</b> - {initiator_status}\n"
+            f"• <b>CounterParty ({counterparty}) Status</b> - {counterparty_status}\n"
             f"• <b>Deal Amount[N/A]</b> - N/A\n"
-            f"• <b>Deal Status</b> - Both Users Joined"
+            f"• <b>Deal Status</b> - {deal_status}"
         )
         sent_msg = await bot.send_message(
             chat_id=DEAL_LOG_CHANNEL_ID,
@@ -400,6 +410,46 @@ async def send_initial_deal_log(bot, room_num, initiator, counterparty, channel_
     except Exception as e:
         log_error(f"Failed to send initial deal log: {e}")
         return None
+
+
+async def update_initial_deal_log(bot, channel_id, initiator, counterparty, room_num, initiator_joined=False, counterparty_joined=False):
+    """Update the initial deal log when users join."""
+    try:
+        full_channel_id = f"-100{channel_id}" if not str(channel_id).startswith("-100") else str(channel_id)
+        if full_channel_id not in group_data:
+            return
+        
+        log_message_id = group_data[full_channel_id].get('log_message_id')
+        if not log_message_id:
+            return
+        
+        initiator_status = "Joined" if initiator_joined else "Not Joined"
+        counterparty_status = "Joined" if counterparty_joined else "Not Joined"
+        
+        if initiator_joined and counterparty_joined:
+            deal_status = "Both Users Joined"
+        elif initiator_joined or counterparty_joined:
+            deal_status = "Waiting for Users"
+        else:
+            deal_status = "Room Assigned"
+        
+        msg = (
+            f"<b>ESCROW ROOM {room_num}</b>\n\n"
+            f"• <b>Initiator ({initiator}) Status</b> - {initiator_status}\n"
+            f"• <b>CounterParty ({counterparty}) Status</b> - {counterparty_status}\n"
+            f"• <b>Deal Amount[N/A]</b> - N/A\n"
+            f"• <b>Deal Status</b> - {deal_status}"
+        )
+        
+        await bot.edit_message_text(
+            chat_id=DEAL_LOG_CHANNEL_ID,
+            message_id=log_message_id,
+            text=msg,
+            parse_mode="HTML"
+        )
+        log_info(f"Updated deal log for room {room_num}: {deal_status}")
+    except Exception as e:
+        log_error(f"Failed to update initial deal log: {e}")
 
 
 async def update_deal_log(bot, deal_id, status):
@@ -3117,13 +3167,16 @@ async def handle_join_request(
                     await asyncio.sleep(2)
                     await send_2fa_welcome_message(context, chat_id, username, user_id)
 
-                    # Send form messages and deal log when second user joins
+                    # Update deal log with join status
+                    room_num = group_data[chat_id].get("room_number", "N/A")
+                    channel_id = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
+                    joined_users = group_data[chat_id]["joined_users"]
+                    initiator_joined = sender_clean in [u.lower() for u in joined_users]
+                    counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
+                    await update_initial_deal_log(context.bot, channel_id, sender, mentioned, room_num, initiator_joined, counterparty_joined)
+
+                    # Send form messages when second user joins
                     if joined_count == 2:
-                        # Send initial deal log to log channel
-                        room_num = group_data[chat_id].get("room_number", "N/A")
-                        channel_id = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
-                        await send_initial_deal_log(context.bot, room_num, sender, mentioned, channel_id)
-                        
                         await asyncio.sleep(1)
                         await send_form_messages(context, chat_id, mentioned, sender)
         else:
@@ -3330,6 +3383,9 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     group_data[full_channel_id]["escrow_message_id"] = sent_msg.message_id
     group_data[full_channel_id]["escrow_chat_id"] = chat_id
     save_group_data()
+
+    # Send initial deal log to log channel
+    await send_initial_deal_log(context.bot, room_num, sender_username, mentioned_user, channel_id, False, False)
 
 
 async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
