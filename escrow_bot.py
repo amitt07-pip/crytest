@@ -3526,8 +3526,9 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if deposit was detected (deal exists with deposit status)
     deposit_detected = False
+    channel_id_str = str(chat_id).replace("-100", "") if str(chat_id).startswith("-100") else str(chat_id)
     for deal_id, deal in deals.items():
-        if deal.get('channel_id') == chat_id:
+        if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
             if deal.get('status') in ['deposit_pending', 'deposit_confirmed', 'completed']:
                 deposit_detected = True
                 break
@@ -3604,23 +3605,29 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     log_warning(f"Could not edit escrow message: {e}")
                 
                 # Also edit the deal log message to show cancelled
+                log_message_id = None
+                # First try to get log_message_id from deals
                 for deal_id, deal in deals.items():
-                    if deal.get('channel_id') == chat_id:
+                    if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
                         log_message_id = deal.get('log_message_id')
-                        if log_message_id:
-                            try:
-                                await context.bot.edit_message_text(
-                                    chat_id=DEAL_LOG_CHANNEL_ID,
-                                    message_id=log_message_id,
-                                    text="<b>Deal Cancelled !!</b>",
-                                    parse_mode="HTML"
-                                )
-                            except Exception as e:
-                                log_warning(f"Could not edit deal log message: {e}")
                         break
+                # If not found in deals, try group_data (for deals cancelled before form submission)
+                if not log_message_id and full_channel_id in group_data:
+                    log_message_id = group_data[full_channel_id].get('log_message_id')
+                
+                if log_message_id:
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=DEAL_LOG_CHANNEL_ID,
+                            message_id=log_message_id,
+                            text="<b>Deal Cancelled !!</b>",
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        log_warning(f"Could not edit deal log message: {e}")
 
     for deal_id, deal in list(deals.items()):
-        if deal.get('channel_id') == chat_id:
+        if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
             del deals[deal_id]
             log_info(f"Deal #{deal_id} marked as completed (cleaned)")
     save_deals()
