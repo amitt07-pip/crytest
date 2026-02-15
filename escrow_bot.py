@@ -170,6 +170,15 @@ BSC_RPC_ENDPOINTS = [
 ]
 NODEREAL_BSC_RPC = BSC_RPC_ENDPOINTS[0]  # Primary endpoint
 
+# Polygon RPC endpoints (with fallbacks)
+POLYGON_RPC_ENDPOINTS = [
+    "https://polygon-rpc.com/",
+    "https://rpc-mainnet.matic.network",
+    "https://rpc-mainnet.maticvigil.com/",
+    "https://polygon-mainnet.public.blastapi.io",
+    "https://polygon.llamarpc.com",
+]
+
 # ERC20 Transfer event topic (keccak256 of "Transfer(address,address,uint256)")
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -1023,39 +1032,107 @@ async def check_bsc_transactions(deposit_address, usdt_contract, monitoring_star
 
 
 async def check_polygon_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
-    """Check Polygon blockchain for USDT transactions.
+    """Check Polygon blockchain for USDT/USDC transactions using RPC.
+    
+    Uses eth_getLogs to query ERC20 Transfer events to the deposit address.
+    Tries multiple RPC endpoints with timeouts for reliability.
     
     Args:
         monitoring_start_time: Unix timestamp when monitoring started. Only transactions
                               after this time will be considered.
     """
-    api_url = BLOCKCHAIN_APIS["POLYGON"]
-    params = {
-        "module": "account",
-        "action": "tokentx",
-        "contractaddress": usdt_contract,
-        "address": deposit_address,
-        "sort": "desc",
-        "apikey": POLYGONSCAN_API_KEY
-    }
+    timeout = aiohttp.ClientTimeout(total=15)
     
-    if monitoring_start_time:
-        params["startblock"] = 0
-        params["endblock"] = 99999999
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(api_url, params=params) as response:
-                if response.status == 200:
+    for rpc_endpoint in POLYGON_RPC_ENDPOINTS:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                block_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_blockNumber",
+                    "params": [],
+                    "id": 1
+                }
+                async with session.post(
+                    rpc_endpoint,
+                    json=block_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(f"Polygon RPC {rpc_endpoint} error getting block number: {response.status}")
+                        continue
                     data = await response.json()
-                    if data.get("status") == "1" and data.get("result"):
-                        results = data["result"]
-                        if monitoring_start_time:
-                            results = [tx for tx in results if int(tx.get("timeStamp", 0)) >= monitoring_start_time]
-                        return results
-    except Exception as e:
-        log_error(f"Polygon API error: {e}")
-
+                    if "error" in data:
+                        log_warning(f"Polygon RPC {rpc_endpoint} error: {data['error']}")
+                        continue
+                    latest_block = int(data["result"], 16)
+                
+                if monitoring_start_time:
+                    seconds_ago = int(time.time()) - monitoring_start_time
+                    blocks_ago = max(10, seconds_ago // 2 + 100)
+                    from_block = hex(latest_block - blocks_ago)
+                else:
+                    from_block = hex(latest_block - 10000)
+                
+                padded_address = "0x" + deposit_address[2:].lower().zfill(64)
+                
+                logs_payload = {
+                    "jsonrpc": "2.0",
+                    "method": "eth_getLogs",
+                    "params": [{
+                        "fromBlock": from_block,
+                        "toBlock": "latest",
+                        "address": usdt_contract,
+                        "topics": [
+                            TRANSFER_EVENT_TOPIC,
+                            None,
+                            padded_address
+                        ]
+                    }],
+                    "id": 2
+                }
+                
+                async with session.post(
+                    rpc_endpoint,
+                    json=logs_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(f"Polygon RPC {rpc_endpoint} error getting logs: {response.status}")
+                        continue
+                    data = await response.json()
+                    if "error" in data:
+                        log_warning(f"Polygon RPC {rpc_endpoint} error: {data['error']}")
+                        continue
+                    
+                    logs = data.get("result", [])
+                    if logs:
+                        log_info(f"Polygon RPC found {len(logs)} transactions for {deposit_address[:10]}...")
+                        transactions = []
+                        for log in logs:
+                            amount_hex = log.get("data", "0x0")
+                            amount_wei = int(amount_hex, 16) if amount_hex else 0
+                            amount = amount_wei / (10 ** 6)
+                            
+                            from_addr = "0x" + log["topics"][1][-40:] if len(log.get("topics", [])) > 1 else ""
+                            
+                            transactions.append({
+                                "hash": log.get("transactionHash", ""),
+                                "from": from_addr,
+                                "to": deposit_address,
+                                "value": str(amount_wei),
+                                "tokenDecimal": "6",
+                                "blockNumber": str(int(log.get("blockNumber", "0x0"), 16))
+                            })
+                        return transactions
+                    return []
+        except asyncio.TimeoutError:
+            log_warning(f"Polygon RPC {rpc_endpoint} timeout")
+            continue
+        except Exception as e:
+            log_warning(f"Polygon RPC {rpc_endpoint} error: {e}")
+            continue
+    
+    log_error("All Polygon RPC endpoints failed")
     return []
 
 
@@ -1129,7 +1206,6 @@ async def get_transactions_for_network(network, deposit_address, monitoring_star
         monitoring_start_time: Unix timestamp when monitoring started. Only transactions
                               after this time will be considered.
     """
-    # Determine if this is USDC or USDT and get the appropriate contract
     if network.startswith("USDC_"):
         base_network = network.replace("USDC_", "")
         contract = USDC_CONTRACTS.get(base_network, "")
@@ -1137,13 +1213,22 @@ async def get_transactions_for_network(network, deposit_address, monitoring_star
         base_network = network
         contract = USDT_CONTRACTS.get(network, "")
 
-    if base_network == "BSC":
-        return await check_bsc_transactions(deposit_address, contract, monitoring_start_time)
-    elif base_network == "POLYGON":
-        return await check_polygon_transactions(deposit_address, contract, monitoring_start_time)
-    elif base_network == "SOL":
-        return await check_solana_transactions(deposit_address, monitoring_start_time)
+    log_info(f"Checking {base_network} for deposits to {deposit_address[:10]}... contract: {contract[:10]}...")
 
+    if base_network == "BSC":
+        txs = await check_bsc_transactions(deposit_address, contract, monitoring_start_time)
+        log_info(f"BSC check returned {len(txs)} transactions")
+        return txs
+    elif base_network == "POLYGON":
+        txs = await check_polygon_transactions(deposit_address, contract, monitoring_start_time)
+        log_info(f"Polygon check returned {len(txs)} transactions")
+        return txs
+    elif base_network == "SOL":
+        txs = await check_solana_transactions(deposit_address, monitoring_start_time)
+        log_info(f"Solana check returned {len(txs)} transactions")
+        return txs
+
+    log_warning(f"Unknown network: {network}")
     return []
 
 
@@ -1310,6 +1395,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
     global deals, active_monitors
 
     if deal_id not in deals:
+        log_warning(f"Deal {deal_id} not found in deals")
         return
 
     deal = deals[deal_id]
@@ -1321,6 +1407,8 @@ async def monitor_blockchain(deal_id, chat_id, bot):
     start_time = asyncio.get_event_loop().time()
     check_interval = 30
     max_duration = 300
+
+    log_info(f"Starting blockchain monitoring for deal {deal_id}: network={network}, address={deposit_address}, amount={deal_amount} {currency}")
 
     while deal_id in active_monitors:
         elapsed = asyncio.get_event_loop().time() - start_time
