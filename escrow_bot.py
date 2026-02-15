@@ -2922,6 +2922,14 @@ async def handle_message(
         if not form_data.get('seller') or not form_data.get('buyer'):
             return
 
+        # Handle "me/Me/ME" in seller/buyer fields - replace with submitter's username
+        submitter_username = f"@{user.username}" if user.username else None
+        if submitter_username:
+            if form_data.get('seller', '').lower() == 'me':
+                form_data['seller'] = submitter_username
+            if form_data.get('buyer', '').lower() == 'me':
+                form_data['buyer'] = submitter_username
+
         deal_id = generate_deal_id()
 
         while deal_id in deals:
@@ -2962,8 +2970,12 @@ async def handle_message(
             except (ValueError, TypeError):
                 pass
         
+        # Get channel_id for deal log updates
+        channel_id = str(chat_id).replace("-100", "") if str(chat_id).startswith("-100") else str(chat_id)
+        
         deals[deal_id] = {
             'chat_id': chat_id,
+            'channel_id': channel_id,
             'seller': form_data['seller'],
             'buyer': form_data['buyer'],
             'buyer_username': form_data['buyer'],
