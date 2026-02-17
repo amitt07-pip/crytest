@@ -1865,12 +1865,12 @@ async def handle_callback(
                 if code:
                     await query.answer(code, show_alert=True)
                 else:
-                    await query.answer("You haven't set up 2FA yet! Use /set2fa [code] in private chat.", show_alert=True)
+                    await query.answer()
             else:
-                # Show error popup if user hasn't set 2FA
-                await query.answer("You haven't set up 2FA yet! Use /set2fa [code] in private chat.", show_alert=True)
+                # No 2FA set - just acknowledge the button (shows loading then stops)
+                await query.answer()
         else:
-            await query.answer("Something went wrong!", show_alert=True)
+            await query.answer()
         return
 
     # Handle 2FA verification callback - grant message permission
