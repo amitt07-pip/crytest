@@ -4264,17 +4264,25 @@ async def kickall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if channel_id < 0:
             channel_id = int(str(channel_id).replace("-100", ""))
         
+        log_info(f"Kickall: chat_id={chat_id}, channel_id={channel_id}")
+        
         participants = await userbot_client.get_participants(channel_id)
+        log_info(f"Kickall: Total participants found: {len(participants)}")
         
         admins = await userbot_client.get_participants(channel_id, filter=ChannelParticipantsAdmins)
         admin_ids = [admin.id for admin in admins]
+        log_info(f"Kickall: Group admins: {admin_ids}")
         admin_ids.extend(ADMIN_USER_IDS)
+        log_info(f"Kickall: All admin IDs (including bot admins): {admin_ids}")
         
         members_to_kick = []
         for participant in participants:
+            log_info(f"Kickall: Checking participant {participant.id}, bot={getattr(participant, 'bot', False)}")
             if participant.id in admin_ids:
+                log_info(f"Kickall: Skipping {participant.id} - is admin")
                 continue
             if hasattr(participant, 'bot') and participant.bot:
+                log_info(f"Kickall: Skipping {participant.id} - is bot")
                 continue
             members_to_kick.append(participant.id)
         
