@@ -4243,6 +4243,56 @@ async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"User {display_name} banned by admin {user_id}")
 
 
+async def kickall(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kick all non-admin members from the group. Triggered by /kickall command."""
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    if user_id not in ADMIN_USER_IDS:
+        return
+    
+    if update.effective_chat.type == "private":
+        return
+    
+    status_msg = await update.message.reply_text("Kicking all members...")
+    
+    kicked_count = 0
+    failed_count = 0
+    
+    try:
+        channel_id = chat_id
+        if channel_id < 0:
+            channel_id = int(str(channel_id).replace("-100", ""))
+        
+        participants = await userbot_client.get_participants(channel_id)
+        
+        for participant in participants:
+            if participant.id in ADMIN_USER_IDS:
+                continue
+            
+            if hasattr(participant, 'bot') and participant.bot:
+                continue
+            
+            try:
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=participant.id)
+                await context.bot.unban_chat_member(chat_id=chat_id, user_id=participant.id)
+                kicked_count += 1
+            except Exception as e:
+                log_error(f"Failed to kick user {participant.id}: {e}")
+                failed_count += 1
+        
+        await status_msg.edit_text(
+            f"<b>KICKALL COMPLETE</b>\n\n"
+            f"Kicked: {kicked_count} members\n"
+            f"Failed: {failed_count}",
+            parse_mode="HTML"
+        )
+        log_info(f"Kickall completed by admin {user_id}: {kicked_count} kicked, {failed_count} failed")
+    except Exception as e:
+        log_error(f"Kickall failed: {e}")
+        await status_msg.edit_text(f"Failed to kick members: {e}")
+
+
 async def unban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Unban a user from using bot commands. Triggered by .unban command."""
     global banned_users
@@ -4914,6 +4964,7 @@ async def main():
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
     app.add_handler(CommandHandler("set2fa", set_2fa))
+    app.add_handler(CommandHandler("kickall", kickall))
     # Admin commands (dot prefix)
     app.add_handler(MessageHandler(filters.Regex(r'^\.setup_rooms\b'), setup_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.rooms\b'), rooms_status))
