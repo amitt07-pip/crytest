@@ -44,7 +44,8 @@ from telegram import (  # noqa: E402
 )
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
-    ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters
+    ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
+    ChatMemberHandler
 )
 from telethon import TelegramClient  # noqa: E402
 from telethon.tl.functions.messages import (  # noqa: E402
@@ -3218,6 +3219,116 @@ async def handle_join_request(
         await join_request.decline()
 
 
+async def handle_chat_member_update(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
+    """Handle users who are directly added to the group (not via join request)."""
+    global group_data
+    
+    chat_member = update.chat_member
+    if not chat_member:
+        return
+    
+    chat_id = str(chat_member.chat.id)
+    new_member = chat_member.new_chat_member
+    old_member = chat_member.old_chat_member
+    
+    if not new_member or not new_member.user:
+        return
+    
+    user = new_member.user
+    user_id = user.id
+    username = user.username.lower() if user.username else None
+    
+    if not username:
+        return
+    
+    old_status = old_member.status if old_member else None
+    new_status = new_member.status
+    
+    is_new_member = (
+        old_status in [None, "left", "kicked"] and 
+        new_status in ["member", "administrator", "restricted"]
+    )
+    
+    if not is_new_member:
+        return
+    
+    if chat_id not in allowed_users:
+        return
+    
+    allowed = allowed_users[chat_id]
+    if username not in allowed:
+        return
+    
+    if chat_id not in group_data:
+        return
+    
+    if username in group_data[chat_id].get("joined_users", []):
+        return
+    
+    log_info(f"User @{username} directly added to group {chat_id}")
+    
+    await asyncio.sleep(1)
+    try:
+        channel_id = int(chat_id)
+        if channel_id < 0:
+            channel_id = int(str(channel_id).replace("-100", ""))
+        
+        restrict_rights = ChatBannedRights(
+            until_date=None,
+            view_messages=False,
+            send_messages=True,
+            send_media=True,
+            send_stickers=True,
+            send_gifs=True,
+            send_games=True,
+            send_inline=True,
+            embed_links=True
+        )
+        await userbot_client(EditBannedRequest(
+            channel=channel_id,
+            participant=user_id,
+            banned_rights=restrict_rights
+        ))
+        log_info(f"User {user_id} (@{username}) restricted from sending messages until 2FA verification")
+    except Exception as e:
+        log_error(f"Failed to restrict user {user_id}: {e}")
+    
+    if "joined_users" not in group_data[chat_id]:
+        group_data[chat_id]["joined_users"] = []
+    
+    group_data[chat_id]["joined_users"].append(username)
+    
+    mentioned = group_data[chat_id].get("mentioned_user", "")
+    sender = group_data[chat_id].get("sender_user", "")
+    mentioned_clean = mentioned.lstrip("@").lower() if mentioned else ""
+    sender_clean = sender.lstrip("@").lower() if sender else ""
+    
+    if username == mentioned_clean:
+        group_data[chat_id]["mentioned_user_id"] = user_id
+    elif username == sender_clean:
+        group_data[chat_id]["sender_user_id"] = user_id
+    
+    save_group_data()
+    
+    joined_count = len(group_data[chat_id]["joined_users"])
+    
+    await asyncio.sleep(2)
+    await send_2fa_welcome_message(context, chat_id, username, user_id)
+    
+    room_num = group_data[chat_id].get("room_number", "N/A")
+    channel_id_str = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
+    joined_users = group_data[chat_id]["joined_users"]
+    initiator_joined = sender_clean in [u.lower() for u in joined_users]
+    counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
+    await update_initial_deal_log(context.bot, channel_id_str, sender, mentioned, room_num, initiator_joined, counterparty_joined)
+    
+    if joined_count == 2:
+        await asyncio.sleep(1)
+        await send_form_messages(context, chat_id, mentioned, sender)
+
+
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global userbot_client
     # Only work in groups, not DMs
@@ -4818,6 +4929,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
+    app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, handle_message
