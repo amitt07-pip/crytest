@@ -4278,37 +4278,33 @@ async def kickall(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 continue
             members_to_kick.append(participant.id)
         
-        async def kick_with_userbot(member_id):
+        log_info(f"Found {len(members_to_kick)} members to kick")
+        
+        for member_id in members_to_kick:
+            userbot_success = False
+            bot_success = False
+            
             try:
                 kick_rights = ChatBannedRights(until_date=None, view_messages=True)
                 await userbot_client(EditBannedRequest(channel=channel_id, participant=member_id, banned_rights=kick_rights))
+                await asyncio.sleep(0.3)
                 unban_rights = ChatBannedRights(until_date=None, view_messages=False)
                 await userbot_client(EditBannedRequest(channel=channel_id, participant=member_id, banned_rights=unban_rights))
-                return True
-            except:
-                return False
-        
-        async def kick_with_bot(member_id):
+                userbot_success = True
+                log_info(f"Userbot kicked member {member_id}")
+            except Exception as e:
+                log_error(f"Userbot failed to kick {member_id}: {e}")
+            
             try:
                 await context.bot.ban_chat_member(chat_id=chat_id, user_id=member_id)
+                await asyncio.sleep(0.3)
                 await context.bot.unban_chat_member(chat_id=chat_id, user_id=member_id)
-                return True
-            except:
-                return False
-        
-        async def kick_member(member_id):
-            results = await asyncio.gather(
-                kick_with_userbot(member_id),
-                kick_with_bot(member_id),
-                return_exceptions=True
-            )
-            return any(r is True for r in results)
-        
-        tasks = [kick_member(member_id) for member_id in members_to_kick]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        for result in results:
-            if result is True:
+                bot_success = True
+                log_info(f"Bot kicked member {member_id}")
+            except Exception as e:
+                log_error(f"Bot failed to kick {member_id}: {e}")
+            
+            if userbot_success or bot_success:
                 kicked_count += 1
             else:
                 failed_count += 1
