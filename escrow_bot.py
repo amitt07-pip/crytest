@@ -57,7 +57,7 @@ from telethon.tl.functions.channels import (  # noqa: E402
     EditBannedRequest
 )
 from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
-from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights  # noqa: E402
+from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins  # noqa: E402
 
 
 API_ID = os.environ.get("API_ID")
@@ -4266,16 +4266,37 @@ async def kickall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         participants = await userbot_client.get_participants(channel_id)
         
+        admins = await userbot_client.get_participants(channel_id, filter=ChannelParticipantsAdmins)
+        admin_ids = [admin.id for admin in admins]
+        admin_ids.extend(ADMIN_USER_IDS)
+        
         for participant in participants:
-            if participant.id in ADMIN_USER_IDS:
+            if participant.id in admin_ids:
                 continue
             
             if hasattr(participant, 'bot') and participant.bot:
                 continue
             
             try:
-                await context.bot.ban_chat_member(chat_id=chat_id, user_id=participant.id)
-                await context.bot.unban_chat_member(chat_id=chat_id, user_id=participant.id)
+                kick_rights = ChatBannedRights(
+                    until_date=None,
+                    view_messages=True
+                )
+                await userbot_client(EditBannedRequest(
+                    channel=channel_id,
+                    participant=participant.id,
+                    banned_rights=kick_rights
+                ))
+                await asyncio.sleep(0.5)
+                unban_rights = ChatBannedRights(
+                    until_date=None,
+                    view_messages=False
+                )
+                await userbot_client(EditBannedRequest(
+                    channel=channel_id,
+                    participant=participant.id,
+                    banned_rights=unban_rights
+                ))
                 kicked_count += 1
             except Exception as e:
                 log_error(f"Failed to kick user {participant.id}: {e}")
