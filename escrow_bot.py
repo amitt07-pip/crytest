@@ -4270,36 +4270,47 @@ async def kickall(update: Update, context: ContextTypes.DEFAULT_TYPE):
         admin_ids = [admin.id for admin in admins]
         admin_ids.extend(ADMIN_USER_IDS)
         
+        members_to_kick = []
         for participant in participants:
             if participant.id in admin_ids:
                 continue
-            
             if hasattr(participant, 'bot') and participant.bot:
                 continue
-            
+            members_to_kick.append(participant.id)
+        
+        async def kick_with_userbot(member_id):
             try:
-                kick_rights = ChatBannedRights(
-                    until_date=None,
-                    view_messages=True
-                )
-                await userbot_client(EditBannedRequest(
-                    channel=channel_id,
-                    participant=participant.id,
-                    banned_rights=kick_rights
-                ))
-                await asyncio.sleep(0.5)
-                unban_rights = ChatBannedRights(
-                    until_date=None,
-                    view_messages=False
-                )
-                await userbot_client(EditBannedRequest(
-                    channel=channel_id,
-                    participant=participant.id,
-                    banned_rights=unban_rights
-                ))
+                kick_rights = ChatBannedRights(until_date=None, view_messages=True)
+                await userbot_client(EditBannedRequest(channel=channel_id, participant=member_id, banned_rights=kick_rights))
+                unban_rights = ChatBannedRights(until_date=None, view_messages=False)
+                await userbot_client(EditBannedRequest(channel=channel_id, participant=member_id, banned_rights=unban_rights))
+                return True
+            except:
+                return False
+        
+        async def kick_with_bot(member_id):
+            try:
+                await context.bot.ban_chat_member(chat_id=chat_id, user_id=member_id)
+                await context.bot.unban_chat_member(chat_id=chat_id, user_id=member_id)
+                return True
+            except:
+                return False
+        
+        async def kick_member(member_id):
+            results = await asyncio.gather(
+                kick_with_userbot(member_id),
+                kick_with_bot(member_id),
+                return_exceptions=True
+            )
+            return any(r is True for r in results)
+        
+        tasks = [kick_member(member_id) for member_id in members_to_kick]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for result in results:
+            if result is True:
                 kicked_count += 1
-            except Exception as e:
-                log_error(f"Failed to kick user {participant.id}: {e}")
+            else:
                 failed_count += 1
         
         await status_msg.edit_text(
