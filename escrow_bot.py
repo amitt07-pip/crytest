@@ -3056,6 +3056,7 @@ async def handle_message(
 
 async def send_2fa_welcome_message(context, chat_id, username, user_id):
     """Send 2FA verification welcome message to a user."""
+    log_info(f"Sending 2FA welcome message to @{username} (ID: {user_id}) in chat {chat_id}")
     msg = (
         f"Hii @{username}, Welcome to the @CryptoIndiaUnited Escrow Group!\n\n"
         f"Please <b>check & verify your 2FA</b> code by clicking the button below "
@@ -3067,12 +3068,16 @@ async def send_2fa_welcome_message(context, chat_id, username, user_id):
         [InlineKeyboardButton("I've checked & verified my 2FA", callback_data=f"verify2fa_{chat_id}_{user_id}")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await context.bot.send_message(
-        chat_id=int(chat_id),
-        text=msg,
-        parse_mode="HTML",
-        reply_markup=reply_markup
-    )
+    try:
+        await context.bot.send_message(
+            chat_id=int(chat_id),
+            text=msg,
+            parse_mode="HTML",
+            reply_markup=reply_markup
+        )
+        log_info(f"2FA welcome message sent successfully to @{username}")
+    except Exception as e:
+        log_error(f"Failed to send 2FA welcome message to @{username}: {e}")
 
 
 async def send_form_messages(context, chat_id, mentioned_user, sender_user):
