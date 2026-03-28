@@ -610,7 +610,8 @@ def generate_deal_id():
 
 
 def parse_deal_form(text):
-    """Parse the filled deal form and extract details."""
+    """Parse the filled deal form and extract details.
+    Returns None if the form format is not matched properly."""
     lines = text.strip().split('\n')
     data = {}
 
@@ -639,6 +640,27 @@ def parse_deal_form(text):
             data['payment_method'] = value
         elif 'time' in key:
             data['time'] = value
+
+    # Validate required fields: seller, buyer, and at least one crypto amount
+    if not data.get('seller') or not data.get('buyer'):
+        return None
+
+    # At least one crypto amount (USDT or USDC) must be present and valid
+    amount_usdt = data.get('amount_usdt', '')
+    amount_usdc = data.get('amount_usdc', '')
+    has_valid_amount = False
+    for amount_str in [amount_usdt, amount_usdc]:
+        if amount_str:
+            try:
+                amount_val = float(amount_str.replace(',', ''))
+                if amount_val > 0:
+                    has_valid_amount = True
+                    break
+            except (ValueError, TypeError):
+                continue
+
+    if not has_valid_amount:
+        return None
 
     return data
 
@@ -2939,7 +2961,8 @@ async def handle_message(
     if 'seller' in text.lower() and 'buyer' in text.lower():
         form_data = parse_deal_form(text)
 
-        if not form_data.get('seller') or not form_data.get('buyer'):
+        # Ignore completely if deal info format is not matched properly
+        if form_data is None:
             return
 
         # Handle "me/Me/ME" in seller/buyer fields - replace with submitter's username
