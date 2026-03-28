@@ -641,25 +641,39 @@ def parse_deal_form(text):
         elif 'time' in key:
             data['time'] = value
 
-    # Validate required fields: seller, buyer, and at least one crypto amount
+    # Strict validation: ALL fields must be present and non-empty
+    # Required: seller, buyer, crypto amount (USDT or USDC), INR amount,
+    # payment method, and time
     if not data.get('seller') or not data.get('buyer'):
         return None
 
-    # At least one crypto amount (USDT or USDC) must be present and valid
+    # Crypto amount (USDT or USDC) must be present and a valid positive number
     amount_usdt = data.get('amount_usdt', '')
     amount_usdc = data.get('amount_usdc', '')
-    has_valid_amount = False
+    has_valid_crypto_amount = False
     for amount_str in [amount_usdt, amount_usdc]:
         if amount_str:
             try:
                 amount_val = float(amount_str.replace(',', ''))
                 if amount_val > 0:
-                    has_valid_amount = True
+                    has_valid_crypto_amount = True
                     break
             except (ValueError, TypeError):
                 continue
 
-    if not has_valid_amount:
+    if not has_valid_crypto_amount:
+        return None
+
+    # INR amount must be present and non-empty
+    if not data.get('amount_inr'):
+        return None
+
+    # Payment method must be present and non-empty
+    if not data.get('payment_method'):
+        return None
+
+    # Time must be present and non-empty
+    if not data.get('time'):
         return None
 
     return data
