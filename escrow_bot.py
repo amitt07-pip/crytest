@@ -2033,7 +2033,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can select the network!")
             return
 
@@ -2100,12 +2100,12 @@ async def handle_callback(
         buyer_clean = deal['buyer'].lstrip('@').lower()
 
         if confirm_type == "seller":
-            if username != seller_clean:
+            if username != seller_clean and user_id not in ADMIN_USER_IDS:
                 await query.answer("Only the seller can confirm!")
                 return
             deal['seller_confirmed'] = True
         elif confirm_type == "buyer":
-            if username != buyer_clean:
+            if username != buyer_clean and user_id not in ADMIN_USER_IDS:
                 await query.answer("Only the buyer can confirm!")
                 return
             deal['buyer_confirmed'] = True
@@ -2272,7 +2272,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can click this button!")
             return
 
@@ -2358,7 +2358,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can cancel the deal!")
             return
 
@@ -2519,7 +2519,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can release payment!")
             return
 
@@ -2574,7 +2574,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can confirm release!")
             return
 
@@ -2650,7 +2650,7 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
 
-        if username != seller_clean:
+        if username != seller_clean and user_id not in ADMIN_USER_IDS:
             await query.answer("Only the seller can cancel the deal!")
             return
 
@@ -2805,7 +2805,7 @@ async def handle_photo(
                 deal.get('chat_id') == chat_id):
             seller_clean = deal['seller'].lstrip('@').lower()
 
-            if username != seller_clean:
+            if username != seller_clean and user.id not in ADMIN_USER_IDS:
                 continue
 
             photo_file_id = message.photo[-1].file_id
@@ -2866,7 +2866,7 @@ async def handle_message(
                     deal.get('chat_id') == chat_id):
                 buyer_clean = deal['buyer'].lstrip('@').lower()
 
-                if username != buyer_clean:
+                if username != buyer_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
                 deal['buyer_address'] = text
@@ -2907,7 +2907,7 @@ async def handle_message(
                     deal.get('chat_id') == chat_id):
                 seller_clean = deal['seller'].lstrip('@').lower()
 
-                if username != seller_clean:
+                if username != seller_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
                 deal['seller_address'] = text
@@ -2942,7 +2942,7 @@ async def handle_message(
                     deal.get('chat_id') == chat_id):
                 seller_clean = deal['seller'].lstrip('@').lower()
 
-                if username != seller_clean:
+                if username != seller_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
                 deal['payment_details'] = text
