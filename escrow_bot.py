@@ -2999,18 +2999,31 @@ async def handle_message(
             if form_data.get('buyer', '').lower() == 'me':
                 form_data['buyer'] = submitter_username
 
+        # Send corrected form back with "Form filled by @username"
+        currency = 'USDT'
+        if form_data.get('amount_usdc'):
+            currency = 'USDC'
+        amount_crypto = form_data.get('amount_usdt') or form_data.get('amount_usdc', '')
+        corrected_form = (
+            f"<b>{currency} Seller:</b> {form_data['seller']}\n"
+            f"<b>{currency} Buyer:</b> {form_data['buyer']}\n"
+            f"<b>Amount[{currency}]:</b> {amount_crypto}\n"
+            f"<b>Amount[INR]:</b> {form_data.get('amount_inr', '')}\n"
+            f"<b>Payment Method:</b> {form_data.get('payment_method', '')}\n"
+            f"<b>Time[Minute]:</b> {form_data.get('time', '')}\n"
+            f"\n"
+            f"Form filled by {submitter_username if submitter_username else 'unknown'}."
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=corrected_form,
+            parse_mode="HTML"
+        )
+
         deal_id = generate_deal_id()
 
         while deal_id in deals:
             deal_id = generate_deal_id()
-
-        currency = 'USDT'
-        if form_data.get('amount_usdc'):
-            currency = 'USDC'
-
-        amount_crypto = form_data.get('amount_usdt') or form_data.get(
-            'amount_usdc', ''
-        )
 
         # Get room number from chat_id
         room_num = get_room_by_channel_id(str(chat_id).replace("-100", ""))
