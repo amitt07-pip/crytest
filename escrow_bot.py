@@ -698,20 +698,24 @@ def get_network_buttons(deal_id, currency="USDT"):
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"
+                    "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC",
+                    style="primary"
                 ),
                 InlineKeyboardButton(
-                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON"
+                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
+                    style="primary"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL"
+                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
+                    style="primary"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "Cancel", callback_data=f"cancel_{deal_id}"
+                    "Cancel", callback_data=f"cancel_{deal_id}",
+                    style="danger"
                 )
             ]
         ]
@@ -719,20 +723,24 @@ def get_network_buttons(deal_id, currency="USDT"):
         keyboard = [
             [
                 InlineKeyboardButton(
-                    "USDT[BSC]", callback_data=f"network_{deal_id}_BSC"
+                    "USDT[BSC]", callback_data=f"network_{deal_id}_BSC",
+                    style="primary"
                 ),
                 InlineKeyboardButton(
-                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON"
+                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
+                    style="primary"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL"
+                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
+                    style="primary"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "Cancel", callback_data=f"cancel_{deal_id}"
+                    "Cancel", callback_data=f"cancel_{deal_id}",
+                    style="danger"
                 )
             ]
         ]
@@ -742,7 +750,7 @@ def get_network_buttons(deal_id, currency="USDT"):
 def get_cancel_only_button(deal_id):
     """Create cancel-only button."""
     keyboard = [[
-        InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}")
+        InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}", style="danger")
     ]]
     return InlineKeyboardMarkup(keyboard)
 
@@ -770,7 +778,8 @@ def get_confirm_buttons(deal_id):
         ],
         [
             InlineKeyboardButton(
-                "Cancel", callback_data=f"cancel_{deal_id}"
+                "Cancel", callback_data=f"cancel_{deal_id}",
+                style="danger"
             )
         ]
     ]
@@ -790,7 +799,8 @@ def get_deposit_buttons(deal_id):
                 "CONFIRM[ADMIN]", callback_data=f"adminconfirm_{deal_id}"
             ),
             InlineKeyboardButton(
-                "CANCEL", callback_data=f"depositcancel_{deal_id}"
+                "CANCEL", callback_data=f"depositcancel_{deal_id}",
+                style="danger"
             )
         ]
     ]
@@ -807,7 +817,8 @@ def get_payment_check_buttons(deal_id):
         ],
         [
             InlineKeyboardButton(
-                "Cancel", callback_data=f"admincancel_{deal_id}"
+                "Cancel", callback_data=f"admincancel_{deal_id}",
+                style="danger"
             )
         ]
     ]
@@ -1403,7 +1414,8 @@ def get_deal_buttons(deal_id):
                 "Dispute", callback_data=f"dispute_{deal_id}"
             ),
             InlineKeyboardButton(
-                "CANCEL", callback_data=f"dealcancel_{deal_id}"
+                "CANCEL", callback_data=f"dealcancel_{deal_id}",
+                style="danger"
             )
         ]
     ]
@@ -4667,7 +4679,7 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📍 Address 1", callback_data=f"setaddy_{deal_id}_1"),
             InlineKeyboardButton("📍 Address 2", callback_data=f"setaddy_{deal_id}_2")
         ],
-        [InlineKeyboardButton("❌ Cancel", callback_data=f"setaddy_{deal_id}_cancel")]
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"setaddy_{deal_id}_cancel", style="danger")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
 
