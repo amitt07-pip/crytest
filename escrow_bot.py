@@ -72,6 +72,7 @@ DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
 USER_2FA_FILE = "user_2fa.json"
+DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
@@ -192,6 +193,7 @@ deals = {}
 rooms = {}
 banned_users = {}
 user_2fa = {}
+deal_form_cache = {}
 
 
 def load_allowed_users():
@@ -276,6 +278,20 @@ def load_user_2fa():
 def save_user_2fa():
     with open(USER_2FA_FILE, "w") as f:
         json.dump(user_2fa, f)
+
+
+def load_deal_form_cache():
+    global deal_form_cache
+    try:
+        with open(DEAL_FORM_CACHE_FILE, "r") as f:
+            deal_form_cache = json.load(f)
+    except FileNotFoundError:
+        deal_form_cache = {}
+
+
+def save_deal_form_cache():
+    with open(DEAL_FORM_CACHE_FILE, "w") as f:
+        json.dump(deal_form_cache, f)
 
 
 def is_user_banned(user_id, username):
@@ -1913,14 +1929,16 @@ async def handle_callback(
     # Handle "CHECK ESCROW DETAILS" callback - show corrected form as popup
     if data.startswith("checkescrow_"):
         deal_id = data.replace("checkescrow_", "")
+        # Check active deals first, then fall back to persistent cache
+        form_text = None
         if deal_id in deals:
             form_text = deals[deal_id].get('corrected_form_text', '')
-            if form_text:
-                await query.answer(form_text, show_alert=True)
-            else:
-                await query.answer("No form details available.", show_alert=True)
+        if not form_text:
+            form_text = deal_form_cache.get(deal_id, '')
+        if form_text:
+            await query.answer(form_text, show_alert=True)
         else:
-            await query.answer("Deal not found.", show_alert=True)
+            await query.answer("No form details available.", show_alert=True)
         return
 
     # Handle review fix callbacks (admin only)
@@ -3126,6 +3144,10 @@ async def handle_message(
             )
         }
         save_deals()
+
+        # Also store form text in persistent cache so it survives deal deletion
+        deal_form_cache[deal_id] = deals[deal_id]['corrected_form_text']
+        save_deal_form_cache()
 
         # Store form submission time in group_data for duration calculation
         if full_channel_id in group_data:
@@ -5084,6 +5106,7 @@ async def main():
     load_rooms()
     load_banned_users()
     load_user_2fa()
+    load_deal_form_cache()
     log_info("Database initialized")
 
     # Log room status
