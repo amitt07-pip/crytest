@@ -330,7 +330,7 @@ def truncate_address(address):
     return f"{address[:3]}...{address[-4:]}"
 
 
-def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False, mentioned_user=None):
+def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address=None, amount=None, token=None, escrow_sender=None, initiator_joined=False, counterparty_joined=False, mentioned_user=None, show_parties=False):
     """Build the deal log message for the log channel."""
     # Format token display (e.g., USDT/USDC)
     token_display = token if token else "N/A"
@@ -348,10 +348,19 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
     initiator_status = "Joined" if initiator_joined else "Not Joined"
     counterparty_status = "Joined" if counterparty_joined else "Not Joined"
     
+    # Build buyer/seller lines (only shown after form is submitted)
+    parties_lines = ""
+    if show_parties and buyer and seller and buyer != 'N/A' and seller != 'N/A':
+        parties_lines = (
+            f"• <b>Seller</b> - {seller}\n"
+            f"• <b>Buyer</b> - {buyer}\n"
+        )
+    
     msg = (
         f"<b>ESCROW ROOM {room_num}</b>\n\n"
         f"• <b>Initiator ({initiator}) Status</b> - {initiator_status}\n"
         f"• <b>CounterParty ({counterparty}) Status</b> - {counterparty_status}\n"
+        f"{parties_lines}"
         f"• <b>Deal Amount[{token_display}]</b> - {amount_display}\n"
         f"• <b>Deal Status</b> - {status}"
     )
@@ -502,13 +511,23 @@ async def update_deal_log(bot, deal_id, status):
                 initiator_joined = sender_clean in [u.lower() for u in joined_users]
                 counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
         
-        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user)
+        # Show buyer/seller parties once the deal has form data
+        show_parties = buyer != 'N/A' and seller != 'N/A'
+        
+        msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user, show_parties)
+        
+        # Add "CHECK ESCROW DETAILS" button if deal has form data
+        reply_markup = None
+        if show_parties and deal.get('corrected_form_text'):
+            keyboard = [[InlineKeyboardButton("CHECK ESCROW DETAILS", callback_data=f"checkescrow_{deal_id}")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
         
         await bot.edit_message_text(
             chat_id=DEAL_LOG_CHANNEL_ID,
             message_id=log_message_id,
             text=msg,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            reply_markup=reply_markup
         )
         log_info(f"Deal log updated for #{deal_id}: {status}")
     except Exception as e:
@@ -1891,6 +1910,19 @@ async def handle_callback(
     user_id = user.id
     username = user.username.lower() if user.username else None
 
+    # Handle "CHECK ESCROW DETAILS" callback - show corrected form as popup
+    if data.startswith("checkescrow_"):
+        deal_id = data.replace("checkescrow_", "")
+        if deal_id in deals:
+            form_text = deals[deal_id].get('corrected_form_text', '')
+            if form_text:
+                await query.answer(form_text, show_alert=True)
+            else:
+                await query.answer("No form details available.", show_alert=True)
+        else:
+            await query.answer("Deal not found.", show_alert=True)
+        return
+
     # Handle review fix callbacks (admin only)
     if data.startswith("review_"):
         if user_id not in ADMIN_USER_IDS:
@@ -3081,7 +3113,17 @@ async def handle_message(
             'mentioned_user': escrow_mentioned_user,
             'sender_user': escrow_sender,
             'form_submitted_at': time_module.time(),
-            'fixed_address_index': fixed_address_index
+            'fixed_address_index': fixed_address_index,
+            'corrected_form_text': (
+                f"{currency} Seller: {form_data['seller']}\n"
+                f"{currency} Buyer: {form_data['buyer']}\n"
+                f"Amount[{currency}]: {amount_crypto}\n"
+                f"Amount[INR]: {form_data.get('amount_inr', '')}\n"
+                f"Payment Method: {form_data.get('payment_method', '')}\n"
+                f"Time[Minute]: {form_data.get('time', '')}\n"
+                f"\n"
+                f"Form filled by {submitter_username if submitter_username else 'unknown'}."
+            )
         }
         save_deals()
 
