@@ -4034,6 +4034,92 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Error: Could not edit escrow message.")
 
 
+async def manual_add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin command to manually mark the counterparty as joined in an escrow room.
+    Usage: /manualadd <room_number>"""
+    global group_data
+
+    user_id = update.effective_user.id
+
+    # Silently ignore non-admin users
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    text = update.message.text.strip()
+    parts = text.split()
+    if len(parts) < 2:
+        await update.message.reply_text("Usage: /manualadd <room_number>")
+        return
+
+    room_num = parts[1]
+
+    # Find the room and its channel_id
+    if room_num not in rooms:
+        await update.message.reply_text(f"Room {room_num} not found.")
+        return
+
+    room_data = rooms[room_num]
+    channel_id = str(room_data.get('channel_id', ''))
+    if not channel_id:
+        await update.message.reply_text(f"Room {room_num} has no channel ID.")
+        return
+
+    # Build the full channel ID (with -100 prefix)
+    full_channel_id = f"-100{channel_id}"
+
+    if full_channel_id not in group_data:
+        await update.message.reply_text(f"No active deal data found for Room {room_num}.")
+        return
+
+    gdata = group_data[full_channel_id]
+    mentioned_user = gdata.get("mentioned_user", "")
+    sender_user = gdata.get("sender_user", "")
+    mentioned_clean = mentioned_user.lstrip("@").lower() if mentioned_user else ""
+    sender_clean = sender_user.lstrip("@").lower() if sender_user else ""
+
+    if "joined_users" not in gdata:
+        gdata["joined_users"] = []
+
+    joined_users = gdata["joined_users"]
+
+    # Determine who the counterparty is (the one NOT yet joined)
+    # The initiator (sender) usually joins first; counterparty is the mentioned user
+    counterparty_username = None
+    if mentioned_clean and mentioned_clean not in [u.lower() for u in joined_users]:
+        counterparty_username = mentioned_clean
+    elif sender_clean and sender_clean not in [u.lower() for u in joined_users]:
+        counterparty_username = sender_clean
+
+    if not counterparty_username:
+        await update.message.reply_text(f"Both users have already joined Room {room_num}.")
+        return
+
+    # Add the counterparty to joined_users
+    joined_users.append(counterparty_username)
+    save_group_data()
+
+    joined_count = len(joined_users)
+
+    # Update the deal log with the new join status
+    initiator_joined = sender_clean in [u.lower() for u in joined_users]
+    counterparty_joined = mentioned_clean in [u.lower() for u in joined_users]
+    await update_initial_deal_log(
+        context.bot, channel_id, sender_user, mentioned_user,
+        room_num, initiator_joined, counterparty_joined
+    )
+
+    await update.message.reply_text(
+        f"Counterparty @{counterparty_username} manually marked as joined in Room {room_num}."
+    )
+
+    log_info(f"Admin manually added counterparty @{counterparty_username} to Room {room_num}")
+
+    # If both users are now joined, send form messages to continue the deal
+    if joined_count >= 2:
+        await asyncio.sleep(1)
+        await send_form_messages(context, full_channel_id, mentioned_user, sender_user)
+
+
 async def rooms_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display professional status of all rooms."""
     user_id = update.effective_user.id
@@ -5145,6 +5231,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
+    app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
