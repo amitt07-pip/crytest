@@ -1964,9 +1964,9 @@ async def handle_callback(
                 if code:
                     await query.answer(code, show_alert=True)
                 else:
-                    await query.answer("You don't have a 2FA code set. Use /set2fa to set one.", show_alert=True)
+                    await query.answer()
             else:
-                await query.answer("You don't have a 2FA code set. Use /set2fa to set one.", show_alert=True)
+                await query.answer()
         else:
             await query.answer()
         return
