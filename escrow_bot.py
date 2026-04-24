@@ -1747,7 +1747,7 @@ async def create_escrow_group(
             log_warning(f"Room {room_number}: Could not set description - {about_error}")
 
         try:
-            from telethon.tl.functions.channels import EditChatDefaultBannedRightsRequest
+            from telethon.tl.functions.messages import EditChatDefaultBannedRightsRequest
             default_banned_rights = ChatBannedRights(
                 until_date=None,
                 view_messages=False,
@@ -1852,13 +1852,8 @@ async def create_escrow_group(
         except Exception as userbot_error:
             log_warning(f"Room {room_number}: Could not set userbot role - {userbot_error}")
 
-        try:
-            await userbot_client(ToggleJoinRequestRequest(
-                channel=channel_id,
-                enabled=True
-            ))
-        except Exception as toggle_error:
-            log_warning(f"Room {room_number}: Could not enable join requests - {toggle_error}")
+        # Join requests are handled via invite link with request_needed=True
+        # ToggleJoinRequestRequest only works on public channels, so we skip it for private chats
 
         invite = await userbot_client(ExportChatInviteRequest(
             peer=channel_id,
