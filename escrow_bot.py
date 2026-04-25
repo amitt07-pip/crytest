@@ -3326,6 +3326,21 @@ async def handle_join_request(
                     await asyncio.sleep(2)
                     await send_2fa_welcome_message(context, chat_id, username, user_id)
 
+                    # If first user joined, send "Waiting for..." message
+                    if joined_count == 1:
+                        # Determine who hasn't joined yet
+                        if username == mentioned_clean:
+                            waiting_for = sender
+                        else:
+                            waiting_for = mentioned
+                        try:
+                            await context.bot.send_message(
+                                chat_id=int(chat_id),
+                                text=f"Waiting for {waiting_for} to join!"
+                            )
+                        except Exception as e:
+                            log_error(f"Failed to send waiting message: {e}")
+
                     # Update deal log with join status
                     room_num = group_data[chat_id].get("room_number", "N/A")
                     channel_id = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
@@ -3441,6 +3456,20 @@ async def handle_chat_member_update(
     
     await asyncio.sleep(2)
     await send_2fa_welcome_message(context, chat_id, username, user_id)
+    
+    # If first user joined, send "Waiting for..." message
+    if joined_count == 1:
+        if username == mentioned_clean:
+            waiting_for = sender
+        else:
+            waiting_for = mentioned
+        try:
+            await context.bot.send_message(
+                chat_id=int(chat_id),
+                text=f"Waiting for {waiting_for} to join!"
+            )
+        except Exception as e:
+            log_error(f"Failed to send waiting message: {e}")
     
     room_num = group_data[chat_id].get("room_number", "N/A")
     channel_id_str = chat_id.replace("-100", "") if chat_id.startswith("-100") else chat_id
