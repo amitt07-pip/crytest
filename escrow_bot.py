@@ -99,7 +99,7 @@ POLYGON_DEPOSIT_ADDRESSES = [
 ]
 
 SOL_DEPOSIT_ADDRESSES = [
-    "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5",  # Address 1
+    "HmqfCsepGq8KNBLKZ2jSyLNsiKYjQK8mpYEmjkQi9weE",  # Address 1
     "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"   # Address 2
 ]
 
