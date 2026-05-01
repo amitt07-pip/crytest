@@ -76,15 +76,15 @@ DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
-    "bsc_address2_qr.jpg"     # QR for Address 2
+    "bsc_qr_2.jpg"     # QR for Address 2
 ]
 POLYGON_QR_IMAGES = [
     "polygon_address1_qr.jpg",  # QR for Address 1
-    "polygon_address2_qr.jpg"   # QR for Address 2
+    "polygon_qr_2.jpg"   # QR for Address 2
 ]
 SOL_QR_IMAGES = [
     "sol_address1_qr.jpg",    # QR for Address 1
-    "sol_address2_qr.jpg"     # QR for Address 2
+    "sol_qr_2.jpg"     # QR for Address 2
 ]
 
 # USDT Deposit Addresses
@@ -106,7 +106,7 @@ SOL_DEPOSIT_ADDRESSES = [
 # USDC Deposit Addresses
 USDC_BSC_QR_IMAGES = [
     "usdc_bsc_address1_qr.jpg",  # QR for Address 1
-    "usdc_bsc_address2_qr.jpg"   # QR for Address 2
+    "usdc_bsc_qr_2.jpg"   # QR for Address 2
 ]
 USDC_BSC_DEPOSIT_ADDRESSES = [
     "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
