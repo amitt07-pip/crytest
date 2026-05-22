@@ -738,14 +738,14 @@ def get_network_buttons(deal_id, currency="USDT"):
                     style="primary", icon_custom_emoji_id="5280848571753584087"
                 ),
                 InlineKeyboardButton(
-                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
-                    style="primary", icon_custom_emoji_id="5197282385212750791"
+                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
+                    style="primary", icon_custom_emoji_id="5244831238002335293"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
-                    style="primary", icon_custom_emoji_id="5244831238002335293"
+                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
+                    style="primary", icon_custom_emoji_id="5197282385212750791"
                 )
             ],
             [
@@ -763,14 +763,14 @@ def get_network_buttons(deal_id, currency="USDT"):
                     style="primary", icon_custom_emoji_id="5280848571753584087"
                 ),
                 InlineKeyboardButton(
-                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
-                    style="primary", icon_custom_emoji_id="5197282385212750791"
+                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
+                    style="primary", icon_custom_emoji_id="5244831238002335293"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
-                    style="primary", icon_custom_emoji_id="5244831238002335293"
+                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
+                    style="primary", icon_custom_emoji_id="5197282385212750791"
                 )
             ],
             [
