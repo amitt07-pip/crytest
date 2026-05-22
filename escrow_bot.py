@@ -735,17 +735,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5280848571753584087"
                 ),
                 InlineKeyboardButton(
                     "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5197282385212750791"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5244831238002335293"
                 )
             ],
             [
@@ -760,17 +760,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDT[BSC]", callback_data=f"network_{deal_id}_BSC",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5280848571753584087"
                 ),
                 InlineKeyboardButton(
                     "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5197282385212750791"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="5244831238002335293"
                 )
             ],
             [
