@@ -1899,7 +1899,7 @@ def get_form_text(currency="USDT"):
 
 
 USDT_FORM_QUERY = (
-    "\nUSDT Seller:\n"
+    "\n\nUSDT Seller:\n"
     "USDT Buyer:\n"
     "Amount[USDT]:\n"
     "Amount[INR]:\n"
@@ -1908,7 +1908,7 @@ USDT_FORM_QUERY = (
 )
 
 USDC_FORM_QUERY = (
-    "\nUSDC Seller:\n"
+    "\n\nUSDC Seller:\n"
     "USDC Buyer:\n"
     "Amount[USDC]:\n"
     "Amount[INR]:\n"
