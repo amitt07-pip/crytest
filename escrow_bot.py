@@ -1918,15 +1918,15 @@ USDC_FORM_QUERY = (
 
 
 def get_form_keyboard():
-    usdt_emoji = "\U0001fa99"  # Fallback coin emoji; custom emoji id: 5413589900450625318
-    usdc_emoji = "\U0001fa99"  # Fallback coin emoji; custom emoji id: 5388945416760866233
     usdt_button = InlineKeyboardButton(
-        f"{usdt_emoji} GET FORM FOR USDT DEAL",
-        switch_inline_query_current_chat=USDT_FORM_QUERY
+        "GET FORM FOR USDT DEAL",
+        switch_inline_query_current_chat=USDT_FORM_QUERY,
+        icon_custom_emoji_id="5413589900450625318"
     )
     usdc_button = InlineKeyboardButton(
-        f"{usdc_emoji} GET FORM FOR USDC DEAL",
-        switch_inline_query_current_chat=USDC_FORM_QUERY
+        "GET FORM FOR USDC DEAL",
+        switch_inline_query_current_chat=USDC_FORM_QUERY,
+        icon_custom_emoji_id="5388945416760866233"
     )
     return InlineKeyboardMarkup([[usdt_button], [usdc_button]])
 
