@@ -40,12 +40,13 @@ def log_warning(message):
     logger.warning(message)
 
 from telegram import (  # noqa: E402
-    Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup,
+    InlineQueryResultArticle, InputTextMessageContent
 )
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
-    ChatMemberHandler
+    ChatMemberHandler, InlineQueryHandler
 )
 from telethon import TelegramClient  # noqa: E402
 from telethon.tl.functions.messages import (  # noqa: E402
@@ -1897,17 +1898,78 @@ def get_form_text(currency="USDT"):
     )
 
 
-def get_form_keyboard(current_currency="USDT"):
-    if current_currency == "USDT":
-        button_text = "GET FORM FOR USDC DEAL"
-        callback_data = "switch_to_usdc"
-    else:
-        button_text = "GET FORM FOR USDT DEAL"
-        callback_data = "switch_to_usdt"
+USDT_FORM_QUERY = (
+    "\nUSDT Seller:\n"
+    "USDT Buyer:\n"
+    "Amount[USDT]:\n"
+    "Amount[INR]:\n"
+    "Payment Method:\n"
+    "Time[Minute]:"
+)
 
-    button = InlineKeyboardButton(button_text, callback_data=callback_data)
-    keyboard = [[button]]
-    return InlineKeyboardMarkup(keyboard)
+USDC_FORM_QUERY = (
+    "\nUSDC Seller:\n"
+    "USDC Buyer:\n"
+    "Amount[USDC]:\n"
+    "Amount[INR]:\n"
+    "Payment Method:\n"
+    "Time[Minute]:"
+)
+
+
+def get_form_keyboard():
+    usdt_button = InlineKeyboardButton(
+        "\U0001fa99 GET FORM FOR USDT DEAL",
+        switch_inline_query_current_chat=USDT_FORM_QUERY
+    )
+    usdc_button = InlineKeyboardButton(
+        "\U0001fa99 GET FORM FOR USDC DEAL",
+        switch_inline_query_current_chat=USDC_FORM_QUERY
+    )
+    return InlineKeyboardMarkup([[usdt_button], [usdc_button]])
+
+
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query
+    query_text = query.query.strip()
+
+    results = []
+    if "USDT" in query_text.upper() or not query_text:
+        usdt_form = (
+            "USDT Seller:\n"
+            "USDT Buyer:\n"
+            "Amount[USDT]:\n"
+            "Amount[INR]:\n"
+            "Payment Method:\n"
+            "Time[Minute]:"
+        )
+        results.append(
+            InlineQueryResultArticle(
+                id="usdt_form",
+                title="USDT Deal Form",
+                description="Tap to send USDT escrow form",
+                input_message_content=InputTextMessageContent(usdt_form)
+            )
+        )
+    if "USDC" in query_text.upper() or not query_text:
+        usdc_form = (
+            "USDC Seller:\n"
+            "USDC Buyer:\n"
+            "Amount[USDC]:\n"
+            "Amount[INR]:\n"
+            "Payment Method:\n"
+            "Time[Minute]:"
+        )
+        results.append(
+            InlineQueryResultArticle(
+                id="usdc_form",
+                title="USDC Deal Form",
+                description="Tap to send USDC escrow form",
+                input_message_content=InputTextMessageContent(usdc_form)
+            )
+        )
+
+    await query.answer(results, cache_time=0)
 
 
 async def handle_callback(
@@ -2051,32 +2113,6 @@ async def handle_callback(
         return
 
     await query.answer()
-
-    if data == "switch_to_usdc":
-        new_text = get_form_text("USDC")
-        new_keyboard = get_form_keyboard("USDC")
-        try:
-            await query.edit_message_text(
-                text=new_text,
-                parse_mode="HTML",
-                reply_markup=new_keyboard
-            )
-        except Exception:
-            pass
-        return
-
-    if data == "switch_to_usdt":
-        new_text = get_form_text("USDT")
-        new_keyboard = get_form_keyboard("USDT")
-        try:
-            await query.edit_message_text(
-                text=new_text,
-                parse_mode="HTML",
-                reply_markup=new_keyboard
-            )
-        except Exception:
-            pass
-        return
 
     if data.startswith("network_"):
         parts = data.split("_")
@@ -3218,7 +3254,7 @@ async def send_form_messages(context, chat_id, mentioned_user, sender_user):
     )
 
     form_text = get_form_text("USDT")
-    keyboard = get_form_keyboard("USDT")
+    keyboard = get_form_keyboard()
     await context.bot.send_message(
         chat_id=int(chat_id),
         text=form_text,
@@ -3250,7 +3286,7 @@ async def send_welcome_messages(context, chat_id, mentioned_user, sender_user):
     )
 
     form_text = get_form_text("USDT")
-    keyboard = get_form_keyboard("USDT")
+    keyboard = get_form_keyboard()
     await context.bot.send_message(
         chat_id=int(chat_id),
         text=form_text,
@@ -5259,6 +5295,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, handle_message
