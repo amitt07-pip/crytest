@@ -4315,23 +4315,22 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     userbot_id = userbot_me.id
     protected_ids = set([bot_id, userbot_id, 6662820986])
 
+    # Clear ALL deals and group_data so users don't get "active escrow" errors
+    cleared_deals = len(deals)
+    cleared_groups = len(group_data)
+    deals.clear()
+    group_data.clear()
+    if cleared_deals > 0:
+        log_info(f"All {cleared_deals} deal(s) cleared (empty command)")
+    if cleared_groups > 0:
+        log_info(f"All {cleared_groups} group data entries cleared (empty command)")
+
     for room_num, room_data in rooms.items():
         channel_id = room_data.get('channel_id')
         if not channel_id:
             continue
 
         full_channel_id = f"-100{channel_id}"
-
-        # Clear deals for this room
-        for deal_id, deal in list(deals.items()):
-            if str(deal.get('chat_id')) == full_channel_id:
-                del deals[deal_id]
-                log_info(f"Deal #{deal_id} removed (empty command)")
-
-        # Clear group_data entry so users can start new deals
-        if full_channel_id in group_data:
-            del group_data[full_channel_id]
-            log_info(f"Group data cleared for room {room_num} (empty command)")
 
         # Kick all members
         try:
