@@ -41,21 +41,13 @@ def log_warning(message):
 
 from telegram import (  # noqa: E402
     Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup,
-    InlineQueryResultArticle, InputTextMessageContent, Bot
+    InlineQueryResultArticle, InputTextMessageContent
 )
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
     ChatMemberHandler, InlineQueryHandler
 )
-
-
-class DelayedBot(Bot):
-    """Bot subclass that adds a 0.25s delay before every API request."""
-
-    async def _do_post(self, *args, **kwargs):
-        await asyncio.sleep(0.25)
-        return await super()._do_post(*args, **kwargs)
 
 from telethon import TelegramClient  # noqa: E402
 from telethon.tl.functions.messages import (  # noqa: E402
@@ -5324,7 +5316,14 @@ async def main():
 
     await init_userbot()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).bot_class(DelayedBot).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Add 0.25s delay to all bot API requests
+    _original_do_post = app.bot._do_post
+    async def _delayed_do_post(*args, **kwargs):
+        await asyncio.sleep(0.25)
+        return await _original_do_post(*args, **kwargs)
+    app.bot._do_post = _delayed_do_post
     # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
