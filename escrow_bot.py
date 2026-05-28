@@ -340,6 +340,33 @@ def get_user_active_deal(username):
     return None, None
 
 
+import re
+import base58
+
+
+def is_valid_evm_address(address):
+    """Check if address is a valid EVM (BSC/Polygon) hex address."""
+    return bool(re.fullmatch(r'0x[0-9a-fA-F]{40}', address))
+
+
+def is_valid_solana_address(address):
+    """Check if address is a valid Solana base58 address."""
+    try:
+        decoded = base58.b58decode(address)
+        return len(decoded) == 32
+    except Exception:
+        return False
+
+
+def is_valid_crypto_address(address, network):
+    """Validate a crypto address for the given network."""
+    if network in ("BSC", "POLYGON", "USDC_BSC", "USDC_POLYGON"):
+        return is_valid_evm_address(address)
+    elif network in ("SOL", "USDC_SOL"):
+        return is_valid_solana_address(address)
+    return False
+
+
 def truncate_address(address):
     """Truncate address to first 3 and last 4 characters."""
     if not address or len(address) < 8:
@@ -2963,7 +2990,15 @@ async def handle_message(
                 if username != buyer_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
-                deal['buyer_address'] = text
+                network = deal.get('network', 'BSC')
+                currency = deal.get('currency', 'USDT')
+                if not is_valid_crypto_address(text.strip(), network):
+                    await message.reply_text(
+                        f"Please provide valid {currency} Address!"
+                    )
+                    return
+
+                deal['buyer_address'] = text.strip()
                 deal['status'] = 'pending_seller_address'
                 save_deals()
 
@@ -3004,7 +3039,15 @@ async def handle_message(
                 if username != seller_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
-                deal['seller_address'] = text
+                network = deal.get('network', 'BSC')
+                currency = deal.get('currency', 'USDT')
+                if not is_valid_crypto_address(text.strip(), network):
+                    await message.reply_text(
+                        f"Please provide valid {currency} Address!"
+                    )
+                    return
+
+                deal['seller_address'] = text.strip()
                 deal['status'] = 'pending_payment_details'
                 save_deals()
 
