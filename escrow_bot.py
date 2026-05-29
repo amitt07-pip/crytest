@@ -2147,7 +2147,7 @@ async def handle_callback(
     if data.startswith("network_"):
         parts = data.split("_")
         deal_id = parts[1]
-        network = parts[2]
+        network = "_".join(parts[2:])
 
         if deal_id not in deals:
             return
