@@ -119,9 +119,15 @@ USDC_BSC_DEPOSIT_ADDRESSES = [
 USDC_POLYGON_DEPOSIT_ADDRESS = "0x6a2757F5987a845D77f3DB441a3d0aB50a3A3A98"  # Address 1
 USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
 
-# USDC Solana - Address 1 only (Address 2 = same as Address 1)
-USDC_SOL_DEPOSIT_ADDRESS = "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"  # Address 1
-USDC_SOL_QR_IMAGE = "usdc_sol_address1_qr.jpg"  # QR for Address 1
+# USDC Solana
+USDC_SOL_QR_IMAGES = [
+    "usdc_sol_qr_1.jpg",          # QR for Address 1
+    "usdc_sol_address1_qr.jpg"    # QR for Address 2
+]
+USDC_SOL_DEPOSIT_ADDRESSES = [
+    "HmqfCsepGq8KNBLKZ2jSyLNsiKYjQK8mpYEmjkQi9weE",  # Address 1
+    "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"   # Address 2
+]
 
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
@@ -129,13 +135,14 @@ DEPOSIT_ADDRESSES = {
     "SOL": SOL_DEPOSIT_ADDRESSES[0],
     "USDC_BSC": USDC_BSC_DEPOSIT_ADDRESSES[0],
     "USDC_POLYGON": USDC_POLYGON_DEPOSIT_ADDRESS,
-    "USDC_SOL": USDC_SOL_DEPOSIT_ADDRESS
+    "USDC_SOL": USDC_SOL_DEPOSIT_ADDRESSES[0]
 }
 
 bsc_address_index = 0
 polygon_address_index = 0
 sol_address_index = 0
 usdc_bsc_address_index = 0
+usdc_sol_address_index = 0
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
 
@@ -925,6 +932,15 @@ def get_usdc_bsc_deposit_info():
     return address, qr_image
 
 
+def get_usdc_sol_deposit_info():
+    """Get rotating USDC SOL deposit address and QR image."""
+    global usdc_sol_address_index
+    address = USDC_SOL_DEPOSIT_ADDRESSES[usdc_sol_address_index]
+    qr_image = USDC_SOL_QR_IMAGES[usdc_sol_address_index]
+    usdc_sol_address_index = (usdc_sol_address_index + 1) % len(USDC_SOL_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
 def build_deposit_message(deal, deal_id):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -975,7 +991,10 @@ def build_deposit_message(deal, deal_id):
                 elif network == "USDC_POLYGON":
                     qr_image = USDC_POLYGON_QR_IMAGE
                 elif network == "USDC_SOL":
-                    qr_image = USDC_SOL_QR_IMAGE
+                    for i, addr in enumerate(USDC_SOL_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = USDC_SOL_QR_IMAGES[i]
+                            break
             if qr_image:
                 deal['qr_image'] = qr_image
     else:
@@ -1020,8 +1039,11 @@ def build_deposit_message(deal, deal_id):
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
         elif network == "USDC_SOL":
-            deposit_address = USDC_SOL_DEPOSIT_ADDRESS
-            qr_image = USDC_SOL_QR_IMAGE
+            if fixed_index is not None and fixed_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
+                deposit_address = USDC_SOL_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = USDC_SOL_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_usdc_sol_deposit_info()
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
         else:
@@ -2851,9 +2873,9 @@ async def handle_callback(
                 elif network == 'POLYGON':
                     new_address = USDC_POLYGON_DEPOSIT_ADDRESS
                     new_qr_image = USDC_POLYGON_QR_IMAGE
-                elif network == 'SOL':
-                    new_address = USDC_SOL_DEPOSIT_ADDRESS
-                    new_qr_image = USDC_SOL_QR_IMAGE
+                elif network == 'SOL' and address_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
+                    new_address = USDC_SOL_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = USDC_SOL_QR_IMAGES[address_index]
 
             if new_address:
                 old_address = deal.get('deposit_address', 'Not set')
