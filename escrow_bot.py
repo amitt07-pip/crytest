@@ -3270,12 +3270,44 @@ async def handle_message(
             f"withdraw {currency} on the network selected by the seller."
         )
 
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=msg,
-            parse_mode="HTML",
-            reply_markup=get_network_buttons(deal_id, currency)
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=msg,
+                parse_mode="HTML",
+                reply_markup=get_network_buttons(deal_id, currency)
+            )
+        except Exception as e:
+            log_error(f"Failed to send network selection message for deal #{deal_id}: {e}")
+            # Fallback: send without custom emoji buttons
+            try:
+                fallback_keyboard = []
+                if currency == "USDC":
+                    fallback_keyboard = [
+                        [
+                            InlineKeyboardButton("USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"),
+                            InlineKeyboardButton("USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL")
+                        ],
+                        [InlineKeyboardButton("USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON")],
+                        [InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}")]
+                    ]
+                else:
+                    fallback_keyboard = [
+                        [
+                            InlineKeyboardButton("USDT[BSC]", callback_data=f"network_{deal_id}_BSC"),
+                            InlineKeyboardButton("USDT[SOL]", callback_data=f"network_{deal_id}_SOL")
+                        ],
+                        [InlineKeyboardButton("USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON")],
+                        [InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}")]
+                    ]
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(fallback_keyboard)
+                )
+            except Exception as e2:
+                log_error(f"Fallback network message also failed for deal #{deal_id}: {e2}")
 
 
 async def send_2fa_welcome_message(context, chat_id, username, user_id):
