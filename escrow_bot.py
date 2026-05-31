@@ -770,17 +770,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC",
-                    style="primary", icon_custom_emoji_id="5280848571753584087"
+                    style="primary", icon_custom_emoji_id="6253755610299372930"
                 ),
                 InlineKeyboardButton(
                     "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
-                    style="primary", icon_custom_emoji_id="5244831238002335293"
+                    style="primary", icon_custom_emoji_id="6255864821493796954"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
-                    style="primary", icon_custom_emoji_id="5197282385212750791"
+                    style="primary", icon_custom_emoji_id="6253279916901535974"
                 )
             ],
             [
@@ -795,17 +795,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDT[BSC]", callback_data=f"network_{deal_id}_BSC",
-                    style="primary", icon_custom_emoji_id="5280848571753584087"
+                    style="primary", icon_custom_emoji_id="6253755610299372930"
                 ),
                 InlineKeyboardButton(
                     "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
-                    style="primary", icon_custom_emoji_id="5244831238002335293"
+                    style="primary", icon_custom_emoji_id="6255864821493796954"
                 )
             ],
             [
                 InlineKeyboardButton(
                     "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
-                    style="primary", icon_custom_emoji_id="5197282385212750791"
+                    style="primary", icon_custom_emoji_id="6253279916901535974"
                 )
             ],
             [
@@ -3440,7 +3440,7 @@ async def handle_join_request(
                         try:
                             await context.bot.send_message(
                                 chat_id=int(chat_id),
-                                text=f"Waiting for {waiting_for} to join!"
+                                text=f"Waiting for {waiting_for} to join the group!"
                             )
                         except Exception as e:
                             log_error(f"Failed to send waiting message: {e}")
@@ -3570,7 +3570,7 @@ async def handle_chat_member_update(
         try:
             await context.bot.send_message(
                 chat_id=int(chat_id),
-                text=f"Waiting for {waiting_for} to join!"
+                text=f"Waiting for {waiting_for} to join the group!"
             )
         except Exception as e:
             log_error(f"Failed to send waiting message: {e}")
