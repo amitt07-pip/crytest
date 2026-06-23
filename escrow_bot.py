@@ -91,7 +91,7 @@ SOL_QR_IMAGES = [
 
 # USDT Deposit Addresses
 BSC_DEPOSIT_ADDRESSES = [
-    "0xa3D0e7da537057cbeC62A48235FbEc8BB38B4E08",  # Address 1
+    "0x526F1629c3624643199c15d6eC2EBdF3Fde49265",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
@@ -111,7 +111,7 @@ USDC_BSC_QR_IMAGES = [
     "usdc_bsc_qr_2.jpg"   # QR for Address 2
 ]
 USDC_BSC_DEPOSIT_ADDRESSES = [
-    "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
+    "0x526F1629c3624643199c15d6eC2EBdF3Fde49265",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
