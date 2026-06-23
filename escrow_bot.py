@@ -101,7 +101,7 @@ POLYGON_DEPOSIT_ADDRESSES = [
 ]
 
 SOL_DEPOSIT_ADDRESSES = [
-    "HmqfCsepGq8KNBLKZ2jSyLNsiKYjQK8mpYEmjkQi9weE",  # Address 1
+    "NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3",  # Address 1
     "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"   # Address 2
 ]
 
@@ -125,7 +125,7 @@ USDC_SOL_QR_IMAGES = [
     "usdc_sol_address1_qr.jpg"    # QR for Address 2
 ]
 USDC_SOL_DEPOSIT_ADDRESSES = [
-    "HmqfCsepGq8KNBLKZ2jSyLNsiKYjQK8mpYEmjkQi9weE",  # Address 1
+    "NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3",  # Address 1
     "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"   # Address 2
 ]
 
