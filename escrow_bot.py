@@ -75,7 +75,111 @@ ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
 USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
-ADDRESS_OVERRIDES_FILE = "address_overrides.json"
+ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
+
+# Default addresses and QR images (used if escrow_addresses.json doesn't exist)
+_DEFAULT_ADDRESSES = {
+    "USDT_BSC": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["bsc_address1_qr.jpg", "bsc_qr_2.jpg"]
+    },
+    "USDT_POLYGON": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["polygon_address1_qr.jpg", "polygon_qr_2.jpg"]
+    },
+    "USDT_SOL": {
+        "addresses": ["NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3", "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"],
+        "qr_images": ["sol_address1_qr.jpg", "sol_qr_2.jpg"]
+    },
+    "USDC_BSC": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["usdc_bsc_address1_qr.jpg", "usdc_bsc_qr_2.jpg"]
+    },
+    "USDC_POLYGON": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265"],
+        "qr_images": ["usdc_polygon_address1_qr.jpg"]
+    },
+    "USDC_SOL": {
+        "addresses": ["NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3", "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"],
+        "qr_images": ["usdc_sol_qr_1.jpg", "usdc_sol_address1_qr.jpg"]
+    }
+}
+
+
+def load_escrow_addresses():
+    """Load escrow addresses from JSON file, or use defaults."""
+    try:
+        with open(ESCROW_ADDRESSES_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # First run - save defaults to file
+        save_escrow_addresses(_DEFAULT_ADDRESSES)
+        return dict(_DEFAULT_ADDRESSES)
+
+
+def save_escrow_addresses(data=None):
+    """Save current escrow addresses to JSON file."""
+    if data is None:
+        data = _build_current_addresses()
+    with open(ESCROW_ADDRESSES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _build_current_addresses():
+    """Build current addresses dict from in-memory arrays."""
+    return {
+        "USDT_BSC": {"addresses": list(BSC_DEPOSIT_ADDRESSES), "qr_images": list(BSC_QR_IMAGES)},
+        "USDT_POLYGON": {"addresses": list(POLYGON_DEPOSIT_ADDRESSES), "qr_images": list(POLYGON_QR_IMAGES)},
+        "USDT_SOL": {"addresses": list(SOL_DEPOSIT_ADDRESSES), "qr_images": list(SOL_QR_IMAGES)},
+        "USDC_BSC": {"addresses": list(USDC_BSC_DEPOSIT_ADDRESSES), "qr_images": list(USDC_BSC_QR_IMAGES)},
+        "USDC_POLYGON": {"addresses": [USDC_POLYGON_DEPOSIT_ADDRESS], "qr_images": [USDC_POLYGON_QR_IMAGE]},
+        "USDC_SOL": {"addresses": list(USDC_SOL_DEPOSIT_ADDRESSES), "qr_images": list(USDC_SOL_QR_IMAGES)},
+    }
+
+
+def _apply_addresses_from_data(data):
+    """Apply loaded address data to in-memory arrays."""
+    global USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+
+    d = data.get("USDT_BSC", {})
+    if d.get("addresses"):
+        BSC_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        BSC_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDT_POLYGON", {})
+    if d.get("addresses"):
+        POLYGON_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        POLYGON_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDT_SOL", {})
+    if d.get("addresses"):
+        SOL_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        SOL_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDC_BSC", {})
+    if d.get("addresses"):
+        USDC_BSC_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        USDC_BSC_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDC_POLYGON", {})
+    if d.get("addresses"):
+        USDC_POLYGON_DEPOSIT_ADDRESS = d["addresses"][0]
+        USDC_POLYGON_QR_IMAGE = d["qr_images"][0]
+
+    d = data.get("USDC_SOL", {})
+    if d.get("addresses"):
+        USDC_SOL_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        USDC_SOL_QR_IMAGES[:] = d["qr_images"]
+
+    # Refresh DEPOSIT_ADDRESSES dict
+    DEPOSIT_ADDRESSES["BSC"] = BSC_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["POLYGON"] = POLYGON_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["SOL"] = SOL_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["USDC_BSC"] = USDC_BSC_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["USDC_POLYGON"] = USDC_POLYGON_DEPOSIT_ADDRESS
+    DEPOSIT_ADDRESSES["USDC_SOL"] = USDC_SOL_DEPOSIT_ADDRESSES[0]
+
+
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
@@ -116,9 +220,9 @@ USDC_BSC_DEPOSIT_ADDRESSES = [
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
-# USDC Polygon - Address 1 only (Address 2 = same as Address 1)
-USDC_POLYGON_DEPOSIT_ADDRESS = "0x526F1629c3624643199c15d6eC2EBdF3Fde49265"  # Address 1
-USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
+# USDC Polygon
+USDC_POLYGON_DEPOSIT_ADDRESS = "0x526F1629c3624643199c15d6eC2EBdF3Fde49265"
+USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"
 
 # USDC Solana
 USDC_SOL_QR_IMAGES = [
@@ -307,30 +411,6 @@ def save_deal_form_cache():
     with open(DEAL_FORM_CACHE_FILE, "w") as f:
         json.dump(deal_form_cache, f)
 
-
-def load_address_overrides():
-    """Load saved address overrides and apply them."""
-    try:
-        with open(ADDRESS_OVERRIDES_FILE, "r") as f:
-            return json.load(f)
-    except FileNotFoundError:
-        return {}
-
-
-def save_address_overrides(overrides):
-    with open(ADDRESS_OVERRIDES_FILE, "w") as f:
-        json.dump(overrides, f, indent=2)
-
-
-def apply_address_overrides(overrides):
-    """Apply all saved address overrides to in-memory arrays."""
-    for key, data in overrides.items():
-        currency = data["currency"]
-        network = data["network"]
-        index = data["index"]
-        address = data["address"]
-        qr_filename = data["qr_filename"]
-        set_address_and_qr(currency, network, index, address, qr_filename)
 
 
 def is_user_banned(user_id, username):
@@ -2848,16 +2928,16 @@ async def handle_callback(
     if data.startswith("chaddy_"):
         parts = data.split("_")
 
-        # chaddy_clearall - clear all saved overrides
+        # chaddy_clearall - reset all addresses to defaults
         if data == "chaddy_clearall":
             if user_id not in ADMIN_USER_IDS:
                 await query.answer("Admin only!")
                 return
-            save_address_overrides({})
+            _apply_addresses_from_data(_DEFAULT_ADDRESSES)
+            save_escrow_addresses()
             await query.edit_message_text(
-                "<b>✅ All address overrides cleared.</b>\n\n"
-                "<i>The bot is now using the default hardcoded addresses. "
-                "Changes will take effect on next restart.</i>",
+                "<b>✅ All addresses reset to defaults.</b>\n\n"
+                "<i>The bot is now using the default addresses.</i>",
                 parse_mode="HTML"
             )
             return
@@ -3245,20 +3325,8 @@ async def handle_message(
         # Get old address for confirmation
         old_addr, old_qr = get_address_and_qr(currency, network, index)
 
-        # Update the address and QR
+        # Update the address and QR (also saves to JSON permanently)
         set_address_and_qr(currency, network, index, new_address, new_qr_filename)
-
-        # Save override persistently
-        overrides = load_address_overrides()
-        override_key = f"{currency}_{network}_{slot}"
-        overrides[override_key] = {
-            "currency": currency,
-            "network": network,
-            "index": index,
-            "address": new_address,
-            "qr_filename": new_qr_filename
-        }
-        save_address_overrides(overrides)
 
         # Clean up session
         changeaddy_sessions.pop(user_id_msg, None)
@@ -5265,6 +5333,8 @@ def set_address_and_qr(currency, network, index, new_address, new_qr_filename):
             DEPOSIT_ADDRESSES[key] = USDC_POLYGON_DEPOSIT_ADDRESS
         else:
             DEPOSIT_ADDRESSES[key] = new_address
+    # Save to JSON permanently
+    save_escrow_addresses()
 
 
 async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5712,11 +5782,10 @@ async def main():
     load_user_2fa()
     load_deal_form_cache()
 
-    # Load and apply saved address overrides
-    address_overrides = load_address_overrides()
-    if address_overrides:
-        apply_address_overrides(address_overrides)
-        log_info(f"Applied {len(address_overrides)} address override(s) from previous session")
+    # Load escrow addresses from JSON (permanent storage)
+    addr_data = load_escrow_addresses()
+    _apply_addresses_from_data(addr_data)
+    log_info(f"Escrow addresses loaded from {ESCROW_ADDRESSES_FILE}")
 
     log_info("Database initialized")
 
@@ -5777,36 +5846,6 @@ async def main():
     app.add_handler(MessageHandler(
         filters.PHOTO, handle_photo
     ))
-
-    # Notify admins about applied address overrides on startup
-    if address_overrides:
-        override_list = ""
-        for key, data in address_overrides.items():
-            slot = data["index"] + 1
-            override_list += (
-                f"• {data['currency']} {data['network']} Address {slot}: "
-                f"<code>{data['address'][:10]}...{data['address'][-6:]}</code>\n"
-            )
-        notify_msg = (
-            f"<b>⚠️ ADDRESS OVERRIDES APPLIED</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"The following address changes from /changeaddy were "
-            f"automatically re-applied on restart:\n\n"
-            f"{override_list}\n"
-            f"Use the button below to clear all overrides, "
-            f"or /changeaddy to modify them."
-        )
-        keyboard = [[InlineKeyboardButton("🗑 Clear All Overrides", callback_data="chaddy_clearall")]]
-        for admin_id in ADMIN_USER_IDS:
-            try:
-                await app.bot.send_message(
-                    chat_id=admin_id,
-                    text=notify_msg,
-                    parse_mode="HTML",
-                    reply_markup=InlineKeyboardMarkup(keyboard)
-                )
-            except Exception:
-                pass
 
     log_info("Bot started successfully")
     await app.run_polling()
