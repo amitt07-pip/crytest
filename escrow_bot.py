@@ -144,6 +144,10 @@ sol_address_index = 0
 usdc_bsc_address_index = 0
 usdc_sol_address_index = 0
 
+# State tracking for /changeaddy admin sessions
+# Key: user_id, Value: dict with slot, currency, network, step
+changeaddy_sessions = {}
+
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
 
 DEAL_LOG_CHANNEL_ID = -1003266978268
@@ -2814,6 +2818,134 @@ async def handle_callback(
             pass
         return
 
+    # Handle changeaddy callbacks (admin changing escrow addresses)
+    if data.startswith("chaddy_"):
+        parts = data.split("_")
+        # chaddy_cancel_{user_id}
+        if parts[1] == "cancel":
+            target_user_id = int(parts[2])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            changeaddy_sessions.pop(user_id, None)
+            await query.edit_message_text("Address change cancelled.", parse_mode="HTML")
+            return
+
+        # chaddy_slot_{1|2}_{user_id}
+        if parts[1] == "slot":
+            slot = int(parts[2])  # 1 or 2
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            changeaddy_sessions[user_id]["slot"] = slot
+            changeaddy_sessions[user_id]["step"] = "currency"
+            keyboard = [
+                [
+                    InlineKeyboardButton("USDT", callback_data=f"chaddy_cur_USDT_{user_id}"),
+                    InlineKeyboardButton("USDC", callback_data=f"chaddy_cur_USDC_{user_id}")
+                ],
+                [InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]
+            ]
+            await query.edit_message_text(
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Selected:</b> Address {slot}\n\n"
+                f"Select currency:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        # chaddy_cur_{USDT|USDC}_{user_id}
+        if parts[1] == "cur":
+            currency = parts[2]
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            session = changeaddy_sessions[user_id]
+            session["currency"] = currency
+            session["step"] = "network"
+            slot = session["slot"]
+            index = slot - 1
+
+            # Build network buttons with current address info
+            networks = ["BSC", "SOL", "POLYGON"]
+            rows = []
+            for net in networks:
+                cur_addr, cur_qr = get_address_and_qr(currency, net, index)
+                if cur_addr is None and currency == "USDC" and net == "POLYGON" and slot == 2:
+                    # USDC Polygon has only 1 address
+                    continue
+                label = f"{currency}[{net}]"
+                rows.append([InlineKeyboardButton(label, callback_data=f"chaddy_net_{net}_{user_id}")])
+
+            rows.append([InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")])
+            await query.edit_message_text(
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Selected:</b> Address {slot} | {currency}\n\n"
+                f"Select network:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(rows)
+            )
+            return
+
+        # chaddy_net_{NETWORK}_{user_id}
+        if parts[1] == "net":
+            network = parts[2]
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            session = changeaddy_sessions[user_id]
+            session["network"] = network
+            session["step"] = "awaiting_qr"
+            slot = session["slot"]
+            currency = session["currency"]
+            index = slot - 1
+
+            cur_addr, cur_qr = get_address_and_qr(currency, network, index)
+
+            # Send current QR image with info
+            import os
+            qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), cur_qr) if cur_qr else None
+
+            msg_text = (
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
+                f"<b>Current Address:</b>\n<code>{cur_addr}</code>\n\n"
+                f"<b>Current QR:</b> <code>{cur_qr}</code>\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📸 <b>Now send the new QR code image.</b>"
+            )
+
+            try:
+                if qr_path and os.path.exists(qr_path):
+                    await query.message.delete()
+                    await context.bot.send_photo(
+                        chat_id=query.message.chat_id,
+                        photo=open(qr_path, 'rb'),
+                        caption=msg_text,
+                        parse_mode="HTML"
+                    )
+                else:
+                    await query.edit_message_text(msg_text, parse_mode="HTML")
+            except Exception:
+                await query.edit_message_text(msg_text, parse_mode="HTML")
+            return
+
     # Handle setaddy callback (admin setting specific address for a deal)
     if data.startswith("setaddy_"):
         user_id = query.from_user.id
@@ -2924,7 +3056,7 @@ async def handle_callback(
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    """Handle photo messages - for payment details QR codes."""
+    """Handle photo messages - for payment details QR codes and changeaddy QR uploads."""
     global deals
 
     message = update.message
@@ -2933,7 +3065,56 @@ async def handle_photo(
 
     chat_id = message.chat_id
     user = message.from_user
+    user_id = user.id
     username = user.username.lower() if user.username else None
+
+    # Handle changeaddy QR image upload
+    if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
+        session = changeaddy_sessions[user_id]
+        slot = session["slot"]
+        currency = session["currency"]
+        network = session["network"]
+        index = slot - 1
+
+        # Download the photo
+        photo_file = await message.photo[-1].get_file()
+        # Build filename based on currency/network/slot
+        if currency == "USDT":
+            if slot == 1:
+                qr_filename = f"{network.lower()}_address1_qr.jpg"
+            else:
+                qr_filename = f"{network.lower()}_qr_2.jpg"
+        else:
+            if network == "POLYGON":
+                qr_filename = "usdc_polygon_address1_qr.jpg"
+            elif network == "SOL":
+                if slot == 1:
+                    qr_filename = "usdc_sol_qr_1.jpg"
+                else:
+                    qr_filename = "usdc_sol_address1_qr.jpg"
+            else:
+                if slot == 1:
+                    qr_filename = f"usdc_{network.lower()}_address1_qr.jpg"
+                else:
+                    qr_filename = f"usdc_{network.lower()}_qr_2.jpg"
+
+        import os
+        qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), qr_filename)
+        await photo_file.download_to_drive(qr_path)
+
+        session["new_qr_filename"] = qr_filename
+        session["step"] = "awaiting_address"
+
+        await message.reply_text(
+            f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
+            f"✅ QR code saved as <code>{qr_filename}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 <b>Now send the new deposit address as text.</b>",
+            parse_mode="HTML"
+        )
+        return
 
     if not message.reply_to_message:
         return
@@ -2994,8 +3175,52 @@ async def handle_message(
 
     chat_id = message.chat_id
     user = message.from_user
+    user_id_msg = user.id
     username = user.username.lower() if user.username else None
     text = message.text.strip()
+
+    # Handle changeaddy address text input
+    if user_id_msg in changeaddy_sessions and changeaddy_sessions[user_id_msg].get("step") == "awaiting_address":
+        session = changeaddy_sessions[user_id_msg]
+        slot = session["slot"]
+        currency = session["currency"]
+        network = session["network"]
+        new_qr_filename = session["new_qr_filename"]
+        index = slot - 1
+        new_address = text.strip()
+
+        # Validate the address
+        if not is_valid_crypto_address(new_address, network if currency == "USDT" else f"USDC_{network}"):
+            await message.reply_text(
+                f"❌ Invalid {currency} address for {network}! Please send a valid address.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Get old address for confirmation
+        old_addr, old_qr = get_address_and_qr(currency, network, index)
+
+        # Update the address and QR
+        set_address_and_qr(currency, network, index, new_address, new_qr_filename)
+
+        # Clean up session
+        changeaddy_sessions.pop(user_id_msg, None)
+
+        await message.reply_text(
+            f"<b>✅ ADDRESS UPDATED SUCCESSFULLY</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>Slot:</b> Address {slot}\n"
+            f"<b>Currency:</b> {currency}\n"
+            f"<b>Network:</b> {network}\n\n"
+            f"<b>Old Address:</b>\n<code>{old_addr}</code>\n\n"
+            f"<b>New Address:</b>\n<code>{new_address}</code>\n\n"
+            f"<b>QR Image:</b> <code>{new_qr_filename}</code>\n\n"
+            f"<i>⚠️ This change is active until the bot restarts. "
+            f"To make it permanent, update the code.</i>",
+            parse_mode="HTML"
+        )
+        log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
+        return
 
     if message.reply_to_message:
         reply_to_msg_id = message.reply_to_message.message_id
@@ -4933,6 +5158,85 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def get_address_and_qr(currency, network, index):
+    """Get current address and QR filename for a given currency/network/index."""
+    if currency == "USDT":
+        if network == "BSC":
+            return BSC_DEPOSIT_ADDRESSES[index], BSC_QR_IMAGES[index]
+        elif network == "POLYGON":
+            return POLYGON_DEPOSIT_ADDRESSES[index], POLYGON_QR_IMAGES[index]
+        elif network == "SOL":
+            return SOL_DEPOSIT_ADDRESSES[index], SOL_QR_IMAGES[index]
+    elif currency == "USDC":
+        if network == "BSC":
+            return USDC_BSC_DEPOSIT_ADDRESSES[index], USDC_BSC_QR_IMAGES[index]
+        elif network == "POLYGON":
+            return USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+        elif network == "SOL":
+            return USDC_SOL_DEPOSIT_ADDRESSES[index], USDC_SOL_QR_IMAGES[index]
+    return None, None
+
+
+def set_address_and_qr(currency, network, index, new_address, new_qr_filename):
+    """Update address and QR filename in the global arrays."""
+    global USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+    if currency == "USDT":
+        if network == "BSC":
+            BSC_DEPOSIT_ADDRESSES[index] = new_address
+            BSC_QR_IMAGES[index] = new_qr_filename
+        elif network == "POLYGON":
+            POLYGON_DEPOSIT_ADDRESSES[index] = new_address
+            POLYGON_QR_IMAGES[index] = new_qr_filename
+        elif network == "SOL":
+            SOL_DEPOSIT_ADDRESSES[index] = new_address
+            SOL_QR_IMAGES[index] = new_qr_filename
+    elif currency == "USDC":
+        if network == "BSC":
+            USDC_BSC_DEPOSIT_ADDRESSES[index] = new_address
+            USDC_BSC_QR_IMAGES[index] = new_qr_filename
+        elif network == "POLYGON":
+            USDC_POLYGON_DEPOSIT_ADDRESS = new_address
+            USDC_POLYGON_QR_IMAGE = new_qr_filename
+        elif network == "SOL":
+            USDC_SOL_DEPOSIT_ADDRESSES[index] = new_address
+            USDC_SOL_QR_IMAGES[index] = new_qr_filename
+    # Update the DEPOSIT_ADDRESSES dict for index 0
+    if index == 0:
+        if currency == "USDT":
+            key = network
+        else:
+            key = f"USDC_{network}"
+        if key == "USDC_POLYGON":
+            DEPOSIT_ADDRESSES[key] = USDC_POLYGON_DEPOSIT_ADDRESS
+        else:
+            DEPOSIT_ADDRESSES[key] = new_address
+
+
+async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/changeaddy - Admin command to change escrow deposit addresses."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    chat_id = update.effective_chat.id
+    changeaddy_sessions[user_id] = {"chat_id": chat_id, "step": "slot"}
+
+    keyboard = [
+        [
+            InlineKeyboardButton("📍 Address 1", callback_data=f"chaddy_slot_1_{user_id}"),
+            InlineKeyboardButton("📍 Address 2", callback_data=f"chaddy_slot_2_{user_id}")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]
+    ]
+    await update.message.reply_text(
+        "<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Which address slot do you want to change?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set a specific address (Address 1 or Address 2) for a deal. Triggered by .setaddy command."""
     user_id = update.effective_user.id
@@ -5094,6 +5398,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .deleteall - Delete all rooms\n"
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
+        "├ /changeaddy - Change escrow address\n"
         "├ .setaddy [deal_id] - Set deal address\n"
         "├ .ban @user - Ban user from bot\n"
         "├ .unban @user - Unban from bot\n"
@@ -5398,6 +5703,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(CommandHandler("manualadd", manual_add))
+    app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
