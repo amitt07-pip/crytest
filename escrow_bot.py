@@ -75,6 +75,7 @@ ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
 USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
+ADDRESS_OVERRIDES_FILE = "address_overrides.json"
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
@@ -305,6 +306,31 @@ def load_deal_form_cache():
 def save_deal_form_cache():
     with open(DEAL_FORM_CACHE_FILE, "w") as f:
         json.dump(deal_form_cache, f)
+
+
+def load_address_overrides():
+    """Load saved address overrides and apply them."""
+    try:
+        with open(ADDRESS_OVERRIDES_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+
+
+def save_address_overrides(overrides):
+    with open(ADDRESS_OVERRIDES_FILE, "w") as f:
+        json.dump(overrides, f, indent=2)
+
+
+def apply_address_overrides(overrides):
+    """Apply all saved address overrides to in-memory arrays."""
+    for key, data in overrides.items():
+        currency = data["currency"]
+        network = data["network"]
+        index = data["index"]
+        address = data["address"]
+        qr_filename = data["qr_filename"]
+        set_address_and_qr(currency, network, index, address, qr_filename)
 
 
 def is_user_banned(user_id, username):
@@ -2821,6 +2847,21 @@ async def handle_callback(
     # Handle changeaddy callbacks (admin changing escrow addresses)
     if data.startswith("chaddy_"):
         parts = data.split("_")
+
+        # chaddy_clearall - clear all saved overrides
+        if data == "chaddy_clearall":
+            if user_id not in ADMIN_USER_IDS:
+                await query.answer("Admin only!")
+                return
+            save_address_overrides({})
+            await query.edit_message_text(
+                "<b>✅ All address overrides cleared.</b>\n\n"
+                "<i>The bot is now using the default hardcoded addresses. "
+                "Changes will take effect on next restart.</i>",
+                parse_mode="HTML"
+            )
+            return
+
         # chaddy_cancel_{user_id}
         if parts[1] == "cancel":
             target_user_id = int(parts[2])
@@ -2928,8 +2969,9 @@ async def handle_callback(
                 f"<b>Current Address:</b>\n<code>{cur_addr}</code>\n\n"
                 f"<b>Current QR:</b> <code>{cur_qr}</code>\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📸 <b>Now send the new QR code image.</b>"
+                f"📸 <b>Now send the new QR code image or cancel.</b>"
             )
+            cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
 
             try:
                 if qr_path and os.path.exists(qr_path):
@@ -2938,12 +2980,13 @@ async def handle_callback(
                         chat_id=query.message.chat_id,
                         photo=open(qr_path, 'rb'),
                         caption=msg_text,
-                        parse_mode="HTML"
+                        parse_mode="HTML",
+                        reply_markup=cancel_kb
                     )
                 else:
-                    await query.edit_message_text(msg_text, parse_mode="HTML")
+                    await query.edit_message_text(msg_text, parse_mode="HTML", reply_markup=cancel_kb)
             except Exception:
-                await query.edit_message_text(msg_text, parse_mode="HTML")
+                await query.edit_message_text(msg_text, parse_mode="HTML", reply_markup=cancel_kb)
             return
 
     # Handle setaddy callback (admin setting specific address for a deal)
@@ -3105,14 +3148,16 @@ async def handle_photo(
         session["new_qr_filename"] = qr_filename
         session["step"] = "awaiting_address"
 
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
         await message.reply_text(
             f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
             f"✅ QR code saved as <code>{qr_filename}</code>\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📝 <b>Now send the new deposit address as text.</b>",
-            parse_mode="HTML"
+            f"📝 <b>Now send the new deposit address as text, or cancel.</b>",
+            parse_mode="HTML",
+            reply_markup=cancel_kb
         )
         return
 
@@ -3203,6 +3248,18 @@ async def handle_message(
         # Update the address and QR
         set_address_and_qr(currency, network, index, new_address, new_qr_filename)
 
+        # Save override persistently
+        overrides = load_address_overrides()
+        override_key = f"{currency}_{network}_{slot}"
+        overrides[override_key] = {
+            "currency": currency,
+            "network": network,
+            "index": index,
+            "address": new_address,
+            "qr_filename": new_qr_filename
+        }
+        save_address_overrides(overrides)
+
         # Clean up session
         changeaddy_sessions.pop(user_id_msg, None)
 
@@ -3214,9 +3271,7 @@ async def handle_message(
             f"<b>Network:</b> {network}\n\n"
             f"<b>Old Address:</b>\n<code>{old_addr}</code>\n\n"
             f"<b>New Address:</b>\n<code>{new_address}</code>\n\n"
-            f"<b>QR Image:</b> <code>{new_qr_filename}</code>\n\n"
-            f"<i>⚠️ This change is active until the bot restarts. "
-            f"To make it permanent, update the code.</i>",
+            f"<b>QR Image:</b> <code>{new_qr_filename}</code>",
             parse_mode="HTML"
         )
         log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
@@ -5656,6 +5711,13 @@ async def main():
     load_banned_users()
     load_user_2fa()
     load_deal_form_cache()
+
+    # Load and apply saved address overrides
+    address_overrides = load_address_overrides()
+    if address_overrides:
+        apply_address_overrides(address_overrides)
+        log_info(f"Applied {len(address_overrides)} address override(s) from previous session")
+
     log_info("Database initialized")
 
     # Log room status
@@ -5715,6 +5777,36 @@ async def main():
     app.add_handler(MessageHandler(
         filters.PHOTO, handle_photo
     ))
+
+    # Notify admins about applied address overrides on startup
+    if address_overrides:
+        override_list = ""
+        for key, data in address_overrides.items():
+            slot = data["index"] + 1
+            override_list += (
+                f"• {data['currency']} {data['network']} Address {slot}: "
+                f"<code>{data['address'][:10]}...{data['address'][-6:]}</code>\n"
+            )
+        notify_msg = (
+            f"<b>⚠️ ADDRESS OVERRIDES APPLIED</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"The following address changes from /changeaddy were "
+            f"automatically re-applied on restart:\n\n"
+            f"{override_list}\n"
+            f"Use the button below to clear all overrides, "
+            f"or /changeaddy to modify them."
+        )
+        keyboard = [[InlineKeyboardButton("🗑 Clear All Overrides", callback_data="chaddy_clearall")]]
+        for admin_id in ADMIN_USER_IDS:
+            try:
+                await app.bot.send_message(
+                    chat_id=admin_id,
+                    text=notify_msg,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            except Exception:
+                pass
 
     log_info("Bot started successfully")
     await app.run_polling()
