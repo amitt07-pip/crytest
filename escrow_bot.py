@@ -5026,6 +5026,86 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"All {room_count} rooms deleted by admin {user_id}")
 
 
+async def delete_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete all old rooms — removes Telegram groups and clears room data."""
+    global userbot_client, rooms
+
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    room_count = len(rooms)
+    if room_count == 0:
+        await update.message.reply_text(
+            "<b>🗑️ Delete Rooms</b>\n\n"
+            "No rooms to delete.",
+            parse_mode="HTML"
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        f"<b>🗑️ Delete Rooms</b>\n\n"
+        f"🔄 Deleting <b>0</b>/{room_count}...",
+        parse_mode="HTML"
+    )
+
+    deleted_count = 0
+    failed_count = 0
+    for i, (room_key, room_data) in enumerate(list(rooms.items()), 1):
+        channel_id = room_data.get('channel_id')
+
+        if i % 5 == 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🗑️ Delete Rooms</b>\n\n"
+                        f"🔄 Deleting <b>{i}</b>/{room_count}..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+        if channel_id:
+            try:
+                full_channel_id = int(f"-100{channel_id}")
+                from telethon.tl.functions.channels import DeleteChannelRequest
+                await userbot_client(DeleteChannelRequest(channel=full_channel_id))
+                deleted_count += 1
+            except Exception as e:
+                log_warning(f"Room {room_key}: Could not delete group - {e}")
+                failed_count += 1
+        else:
+            failed_count += 1
+
+        await asyncio.sleep(1)
+
+    rooms.clear()
+    save_rooms()
+    log_info(f"All rooms deleted by admin {user_id}")
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🗑️ Delete Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Deleted: <b>{deleted_count}</b>\n"
+                f"  ↳ Failed: <b>{failed_count}</b>\n"
+                f"  ↳ Remaining: <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
 async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create 20 new escrow rooms. Clears existing rooms and creates fresh ones."""
     global userbot_client, rooms
@@ -5864,7 +5944,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .cmd - Show this command list\n"
         "├ .rooms - View all room statuses\n"
         "├ .empty - Empty all rooms\n"
-        "├ .deleteall - Delete all rooms\n"
+        "├ .deleteall - Clear room data\n"
+        "├ .delete_rooms - Delete all Telegram groups\n"
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
         "├ /changeaddy - Change escrow address\n"
@@ -6170,6 +6251,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.rooms\b'), rooms_status))
     app.add_handler(MessageHandler(filters.Regex(r'^\.empty\b'), empty_all_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.deleteall\b'), delete_all_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.delete_rooms\b'), delete_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.newrooms\b'), create_new_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.ban\b'), ban_user))
     app.add_handler(MessageHandler(filters.Regex(r'^\.unban\b'), unban_user))
