@@ -4376,6 +4376,23 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     full_channel_id = str(chat_id)
 
+    # Block cleaning if there's an active (non-completed) deal
+    channel_id_str = str(chat_id).replace("-100", "") if str(chat_id).startswith("-100") else str(chat_id)
+    for deal_id, deal in deals.items():
+        if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
+            deal_status = deal.get('status', '')
+            if deal_status not in ('completed', 'released', 'payment_released'):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"❌ Cannot clean group while deal <b>#{deal_id}</b> is active.\n\n"
+                        f"Please cancel the deal first using /cancel or the cancel button."
+                    ),
+                    parse_mode="HTML",
+                    reply_to_message_id=update.message.message_id
+                )
+                return
+
     if userbot_client is None:
         await init_userbot()
 
