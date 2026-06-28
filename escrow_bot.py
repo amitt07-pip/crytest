@@ -4484,6 +4484,185 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
 
+async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mark an existing group as an active bot room by chat ID."""
+    global userbot_client
+
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "<b>Usage:</b> <code>/markactive [chat_id]</code>\n\n"
+            "<b>Example:</b> <code>/markactive -1001234567890</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    raw_chat_id = context.args[0].strip()
+    try:
+        target_id = int(raw_chat_id)
+    except ValueError:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "❌ Invalid chat ID. Must be a number.",
+            parse_mode="HTML"
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        "<b>📌 Mark Active</b>\n\n"
+        "🔍 Fetching group info...",
+        parse_mode="HTML"
+    )
+
+    try:
+        entity = await userbot_client.get_entity(target_id)
+    except Exception as e:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Could not access group: <code>{e}</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
+
+    group_title = getattr(entity, 'title', '') or ''
+    channel_id = entity.id
+
+    # Extract room number from title
+    room_number = None
+    if 'Crypto India Escrow Room' in group_title:
+        try:
+            room_number = int(group_title.replace('Crypto India Escrow Room', '').strip())
+        except ValueError:
+            pass
+
+    if room_number is None:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Group name '<b>{group_title}</b>' doesn't match "
+                    f"'Crypto India Escrow Room [N]' format."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
+
+    # Check if room number already exists
+    room_key = str(room_number)
+    if room_key in rooms:
+        existing_cid = rooms[room_key].get('channel_id')
+        if str(existing_cid) == str(channel_id):
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        "<b>📌 Mark Active</b>\n\n"
+                        f"Room {room_number} is already active with this group."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+            return
+
+    # Check admins in the group
+    admin_info = []
+    bot_is_admin = False
+    userbot_is_admin = False
+    try:
+        from telethon.tl.functions.channels import GetParticipantsRequest
+        from telethon.tl.types import ChannelParticipantsAdmins
+        admins_result = await userbot_client(GetParticipantsRequest(
+            channel=target_id,
+            filter=ChannelParticipantsAdmins(),
+            offset=0,
+            limit=100,
+            hash=0
+        ))
+        admin_ids_in_group = {u.id for u in admins_result.users}
+        bot_info = await context.bot.get_me()
+        me = await userbot_client.get_me()
+        bot_is_admin = bot_info.id in admin_ids_in_group
+        userbot_is_admin = me.id in admin_ids_in_group
+        for u in admins_result.users:
+            name = f"{u.first_name or ''} {u.last_name or ''}".strip()
+            admin_info.append(f"  ↳ {name} (<code>{u.id}</code>)")
+    except Exception:
+        pass
+
+    # Generate invite link
+    invite_link = None
+    try:
+        invite = await userbot_client(ExportChatInviteRequest(
+            peer=target_id,
+            expire_date=None,
+            usage_limit=0,
+            request_needed=True
+        ))
+        invite_link = invite.link
+    except Exception:
+        pass
+
+    # Store old room if replacing
+    if room_key in rooms:
+        old_cid = rooms[room_key].get('channel_id')
+        if old_cid:
+            add_old_room(old_cid, f"Crypto India Escrow Room {room_number}")
+
+    # Register the room
+    rooms[room_key] = {
+        "room_number": room_number,
+        "channel_id": channel_id,
+        "invite_link": invite_link or "",
+        "status": "free",
+        "current_deal_id": None,
+        "sender_user": None,
+        "mentioned_user": None
+    }
+    save_rooms()
+
+    admins_text = "\n".join(admin_info) if admin_info else "  ↳ Could not fetch"
+    bot_status = "✅" if bot_is_admin else "❌"
+    userbot_status = "✅" if userbot_is_admin else "❌"
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>📌 Mark Active</b>\n\n"
+                f"✅ <b>Room {room_number} registered</b>\n\n"
+                f"  ↳ Name: <b>{group_title}</b>\n"
+                f"  ↳ Channel ID: <code>{channel_id}</code>\n"
+                f"  ↳ Bot admin: {bot_status}\n"
+                f"  ↳ Userbot admin: {userbot_status}\n\n"
+                f"<b>Admins:</b>\n{admins_text}"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
 async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Send example form for escrow deal."""
     example_text = (
@@ -5981,6 +6160,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .empty - Empty all rooms\n"
         "├ .deleteall - Clear room data\n"
         "├ .delete_rooms - Delete all Telegram groups\n"
+        "├ /markactive [chat_id] - Register group as room\n"
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
         "├ /changeaddy - Change escrow address\n"
@@ -6298,6 +6478,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.wallets\b'), wallets_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(CommandHandler("cancel", cancel_command))
+    app.add_handler(CommandHandler("markactive", mark_active))
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
