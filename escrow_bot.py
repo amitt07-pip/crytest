@@ -4405,8 +4405,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(
                     chat_id=chat_id,
                     text=(
-                        f"❌ Cannot clean group while deal <b>#{deal_id}</b> is active.\n\n"
-                        f"Please cancel the deal first using /cancel or the cancel button."
+                        f"Please cancel the active deal first using /cancel or the cancel button."
                     ),
                     parse_mode="HTML",
                     reply_to_message_id=update.message.message_id
