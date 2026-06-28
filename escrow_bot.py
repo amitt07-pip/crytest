@@ -4300,13 +4300,11 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await context.bot.send_message(
+    status_msg = await context.bot.send_message(
         chat_id=chat_id,
         text=(
-            "<b>🔧 SETUP ROOMS</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔄 Checking existing rooms and creating missing ones...\n\n"
-            "<i>This may take a few minutes.</i>"
+            "<b>🔧 Setup Rooms</b>\n\n"
+            "🔄 Verifying rooms <b>0</b>/20..."
         ),
         parse_mode="HTML"
     )
@@ -4321,6 +4319,21 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         room_key = str(room_number)
         expected_title = f"Crypto India Escrow Room {room_number}"
         
+        # Update progress every 5 rooms
+        if room_number % 5 == 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🔧 Setup Rooms</b>\n\n"
+                        f"🔄 Verifying rooms <b>{room_number - 1}</b>/20..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
         # Check if room exists in our records
         if room_key in rooms:
             room_data = rooms[room_key]
@@ -4368,7 +4381,6 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     recreated_count += 1
 
                 except Exception as e:
-                    # Group doesn't exist or can't be accessed
                     log_warning(f"Room {room_number} group not accessible, recreating: {e}")
                     del rooms[room_key]
                     save_rooms()
@@ -4402,20 +4414,22 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log_error(f"Room {room_number}: Setup failed - {e}")
             continue
 
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"<b>🔧 SETUP ROOMS</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"<b>✅ Setup Complete</b>\n\n"
-            f"<b>📊 Results:</b>\n"
-            f"├ ✅ Verified: <b>{skipped_count}</b>\n"
-            f"├ 🆕 New: <b>{created_count}</b>\n"
-            f"├ 🔄 Recreated: <b>{recreated_count}</b>\n"
-            f"└ 📋 Total: <b>{len(rooms)}</b>"
-        ),
-        parse_mode="HTML"
-    )
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🔧 Setup Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Verified: <b>{skipped_count}</b>\n"
+                f"  ↳ New: <b>{created_count}</b>\n"
+                f"  ↳ Recreated: <b>{recreated_count}</b>\n"
+                f"  ↳ Total: <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
 
 
 async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -5003,11 +5017,9 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await update.message.reply_text(
-        "<b>🏗️ CREATE NEW ROOMS</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔄 Clearing existing rooms and creating 20 new escrow rooms...\n\n"
-        "<i>This may take a few minutes.</i>",
+    status_msg = await update.message.reply_text(
+        "<b>🏗️ New Rooms</b>\n\n"
+        "🔄 Creating room <b>0</b>/20...",
         parse_mode="HTML"
     )
 
@@ -5023,6 +5035,21 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed_count = 0
 
     for room_number in range(1, 21):
+        # Update progress every 5 rooms
+        if room_number % 5 == 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🏗️ New Rooms</b>\n\n"
+                        f"🔄 Creating room <b>{room_number}</b>/20..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
         try:
             invite_link, room_num, channel_id = await create_escrow_group(
                 room_number,
@@ -5051,16 +5078,21 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             failed_count += 1
             log_error(f"Room {room_number}: Setup failed - {e}")
 
-    await update.message.reply_text(
-        f"<b>🏗️ CREATE NEW ROOMS</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>✅ Operation Complete</b>\n\n"
-        f"<b>📊 Results:</b>\n"
-        f"├ 🟢 Created: <b>{created_count}</b> room(s)\n"
-        f"├ 🔴 Failed: <b>{failed_count}</b> room(s)\n"
-        f"└ 📋 Total Rooms: <b>{len(rooms)}</b>",
-        parse_mode="HTML"
-    )
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🏗️ New Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Created: <b>{created_count}</b>\n"
+                f"  ↳ Failed: <b>{failed_count}</b>\n"
+                f"  ↳ Total: <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
 
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
