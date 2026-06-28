@@ -4492,6 +4492,16 @@ async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id not in ADMIN_USER_IDS:
         return
 
+    # Reject if all 20 rooms are active with no gaps
+    all_active = all(str(n) in rooms for n in range(1, 21))
+    if all_active:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "❌ All 20 rooms (1-20) are already active. No slots available.",
+            parse_mode="HTML"
+        )
+        return
+
     if not context.args:
         await update.message.reply_text(
             "<b>📌 Mark Active</b>\n\n"
@@ -4653,6 +4663,88 @@ async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception:
         pass
+
+
+async def mark_inactive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a room from the active pool by chat ID."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            "<b>Usage:</b> <code>/markinactive [chat_id]</code>\n\n"
+            "<b>Example:</b> <code>/markinactive -1001234567890</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    try:
+        target_id = int(raw_chat_id)
+    except ValueError:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            "❌ Invalid chat ID. Must be a number.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Convert to channel ID format (strip -100 prefix if present)
+    target_str = str(target_id)
+    if target_str.startswith("-100"):
+        channel_id_str = target_str[4:]
+    else:
+        channel_id_str = target_str
+
+    # Find the room with this channel ID
+    found_key = None
+    found_room = None
+    for room_key, room_data in rooms.items():
+        if str(room_data.get('channel_id')) == channel_id_str:
+            found_key = room_key
+            found_room = room_data
+            break
+
+    if not found_key:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            f"❌ No active room found with chat ID <code>{raw_chat_id}</code>.",
+            parse_mode="HTML"
+        )
+        return
+
+    room_number = found_room.get('room_number', found_key)
+
+    # Check for active deal
+    has_active_deal = False
+    for deal_id, deal in deals.items():
+        if str(deal.get('channel_id')) == channel_id_str:
+            if deal.get('status') not in ['completed', 'cancelled', 'released']:
+                has_active_deal = True
+                break
+
+    if has_active_deal:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            f"❌ Room {room_number} has an active deal. Cancel it first.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Remove from active rooms
+    del rooms[found_key]
+    save_rooms()
+
+    await update.message.reply_text(
+        f"<b>📌 Mark Inactive</b>\n\n"
+        f"✅ Room {room_number} removed from active pool.\n\n"
+        f"  ↳ Channel ID: <code>{channel_id_str}</code>\n"
+        f"  ↳ Active rooms: <b>{len(rooms)}</b>",
+        parse_mode="HTML"
+    )
+    log_info(f"Room {room_number} marked inactive by admin {user_id}")
 
 
 async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -6153,6 +6245,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .deleteall - Clear room data\n"
         "├ .delete_rooms - Delete all Telegram groups\n"
         "├ /markactive [chat_id] - Register group as room\n"
+        "├ /markinactive [chat_id] - Remove room from pool\n"
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
         "├ /changeaddy - Change escrow address\n"
@@ -6471,6 +6564,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("markactive", mark_active))
+    app.add_handler(CommandHandler("markinactive", mark_inactive))
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
