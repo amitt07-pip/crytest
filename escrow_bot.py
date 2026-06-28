@@ -5718,6 +5718,40 @@ async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"User {user_id} (@{username}) set their 2FA code")
 
 
+async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all current escrow wallet addresses (admin only)."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    msg = (
+        "<b>💰 ESCROW WALLET ADDRESSES</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>🔸 USDT [BSC]</b>\n"
+        f"  Address 1: <code>{BSC_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  Address 2: <code>{BSC_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔸 USDT [Polygon]</b>\n"
+        f"  Address 1: <code>{POLYGON_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  Address 2: <code>{POLYGON_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔸 USDT [Solana]</b>\n"
+        f"  Address 1: <code>{SOL_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  Address 2: <code>{SOL_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>🔹 USDC [BSC]</b>\n"
+        f"  Address 1: <code>{USDC_BSC_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  Address 2: <code>{USDC_BSC_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔹 USDC [Polygon]</b>\n"
+        f"  Address 1: <code>{USDC_POLYGON_DEPOSIT_ADDRESS}</code>\n\n"
+        "<b>🔹 USDC [Solana]</b>\n"
+        f"  Address 1: <code>{USDC_SOL_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  Address 2: <code>{USDC_SOL_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Use /changeaddy to update addresses</i>"
+    )
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -5748,6 +5782,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .gunban @user - Unban from all groups\n"
         "├ .banned - List banned users\n"
         "├ .complete - Mark deal as completed\n"
+        "├ .wallets - View all escrow addresses\n"
         "└ .review - Scan rooms for issues"
     )
 
@@ -6050,6 +6085,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.wallets\b'), wallets_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
     app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("manualadd", manual_add))
