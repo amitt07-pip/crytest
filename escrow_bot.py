@@ -2690,7 +2690,8 @@ async def handle_callback(
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=cancel_text,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
         return
 
@@ -2858,7 +2859,8 @@ async def handle_callback(
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=cancel_text,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
         return
 
@@ -3057,7 +3059,8 @@ async def handle_callback(
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text=cancel_text,
-            parse_mode="HTML"
+            parse_mode="HTML",
+            disable_web_page_preview=True
         )
         return
 
@@ -6021,7 +6024,8 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=chat_id,
         text=cancel_text,
-        parse_mode="HTML"
+        parse_mode="HTML",
+        disable_web_page_preview=True
     )
 
 
