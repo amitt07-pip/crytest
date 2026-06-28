@@ -4391,7 +4391,7 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         hash=0
                     ))
                     admin_ids_in_group = {u.id for u in admins_result.users}
-                    # Check bot and userbot are admins
+                    # Check bot and userbot are admins (7338429782 is not mandatory)
                     missing = [rid for rid in [bot_id, userbot_id] if rid not in admin_ids_in_group]
                     if missing:
                         needs_recreate = True
