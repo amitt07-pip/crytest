@@ -2646,13 +2646,13 @@ async def handle_callback(
 
         if other_link:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"{other_link} [{other_role}] the deal has been "
                 f"cancelled by {canceller_link} [{canceller_role}]."
             )
         else:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
             )
 
@@ -2808,13 +2808,13 @@ async def handle_callback(
 
         if other_link:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"{other_link} [{other_role}] the deal has been "
                 f"cancelled by {canceller_link} [{canceller_role}]."
             )
         else:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
             )
 
@@ -2999,13 +2999,13 @@ async def handle_callback(
 
         if other_link:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"{other_link} [{other_role}] the deal has been "
                 f"cancelled by {canceller_link} [{canceller_role}]."
             )
         else:
             cancel_text = (
-                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
                 f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
             )
 
@@ -5496,13 +5496,13 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if other_link:
         cancel_text = (
-            f"<b><u>Deal</u></b> #{active_deal_id}\n"
+            f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
             f"{other_link} [{other_role}] the deal has been "
             f"cancelled by {canceller_link} [{canceller_role}]."
         )
     else:
         cancel_text = (
-            f"<b><u>Deal</u></b> #{active_deal_id}\n"
+            f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
             f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
         )
 
