@@ -4334,6 +4334,9 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
+    bot_id = bot_info.id
+    userbot_me = await userbot_client.get_me()
+    userbot_id = userbot_me.id
 
     # Phase 1: Verify all rooms
     verified_count = 0
@@ -4388,8 +4391,9 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         hash=0
                     ))
                     admin_ids_in_group = {u.id for u in admins_result.users}
-                    missing_admins = [aid for aid in ADMIN_USER_IDS if aid not in admin_ids_in_group]
-                    if missing_admins:
+                    # Check bot and userbot are admins
+                    missing = [rid for rid in [bot_id, userbot_id] if rid not in admin_ids_in_group]
+                    if missing:
                         needs_recreate = True
                 except Exception:
                     pass
