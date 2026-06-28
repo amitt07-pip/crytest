@@ -787,7 +787,7 @@ def get_room_by_channel_id(channel_id):
 
 
 def generate_deal_id():
-    return f"D{random.randint(1000, 9999)}"
+    return f"D{random.randint(36432, 99999)}"
 
 
 def parse_deal_form(text):
