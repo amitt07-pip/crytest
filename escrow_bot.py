@@ -4316,22 +4316,59 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     created_count = 0
     recreated_count = 0
+    skipped_count = 0
     for room_number in range(1, 21):
         room_key = str(room_number)
+        expected_title = f"Crypto India Escrow Room {room_number}"
         
         # Check if room exists in our records
         if room_key in rooms:
-            # Verify the group still exists by trying to access it
             room_data = rooms[room_key]
             channel_id = room_data.get('channel_id')
             if channel_id:
+                needs_recreate = False
+                reason = ""
                 try:
                     full_channel_id = int(f"-100{channel_id}")
-                    await userbot_client.get_entity(full_channel_id)
-                    # Group exists, skip
-                    continue
+                    entity = await userbot_client.get_entity(full_channel_id)
+
+                    # Check group name matches expected room number
+                    group_title = getattr(entity, 'title', '') or ''
+                    if group_title != expected_title:
+                        needs_recreate = True
+                        reason = f"name mismatch ('{group_title}' != '{expected_title}')"
+
+                    # Check admin IDs are present in the group
+                    if not needs_recreate:
+                        try:
+                            from telethon.tl.functions.channels import GetParticipantsRequest
+                            from telethon.tl.types import ChannelParticipantsAdmins
+                            admins_result = await userbot_client(GetParticipantsRequest(
+                                channel=full_channel_id,
+                                filter=ChannelParticipantsAdmins(),
+                                offset=0,
+                                limit=100,
+                                hash=0
+                            ))
+                            admin_ids_in_group = {u.id for u in admins_result.users}
+                            missing_admins = [aid for aid in ADMIN_USER_IDS if aid not in admin_ids_in_group]
+                            if missing_admins:
+                                needs_recreate = True
+                                reason = f"missing admin IDs: {missing_admins}"
+                        except Exception as admin_err:
+                            log_warning(f"Room {room_number}: Could not check admins - {admin_err}")
+
+                    if not needs_recreate:
+                        skipped_count += 1
+                        continue
+
+                    log_warning(f"Room {room_number} invalid ({reason}), recreating")
+                    del rooms[room_key]
+                    save_rooms()
+                    recreated_count += 1
+
                 except Exception as e:
-                    # Group doesn't exist or can't be accessed, need to recreate
+                    # Group doesn't exist or can't be accessed
                     log_warning(f"Room {room_number} group not accessible, recreating: {e}")
                     del rooms[room_key]
                     save_rooms()
@@ -4372,9 +4409,10 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"<b>✅ Setup Complete</b>\n\n"
             f"<b>📊 Results:</b>\n"
-            f"├ 🆕 New Rooms Created: <b>{created_count}</b>\n"
-            f"├ 🔄 Rooms Recreated: <b>{recreated_count}</b>\n"
-            f"└ 📋 Total Rooms: <b>{len(rooms)}</b>"
+            f"├ ✅ Verified: <b>{skipped_count}</b>\n"
+            f"├ 🆕 New: <b>{created_count}</b>\n"
+            f"├ 🔄 Recreated: <b>{recreated_count}</b>\n"
+            f"└ 📋 Total: <b>{len(rooms)}</b>"
         ),
         parse_mode="HTML"
     )
