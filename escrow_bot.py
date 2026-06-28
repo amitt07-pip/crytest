@@ -3595,6 +3595,10 @@ async def handle_message(
         return
 
     if 'seller' in text.lower() and 'buyer' in text.lower():
+        # Only process deal forms in bot-managed groups (rooms)
+        if get_room_by_channel_id(chat_id) is None:
+            return
+
         form_data = parse_deal_form(text)
 
         # Ignore completely if deal info format is not matched properly
