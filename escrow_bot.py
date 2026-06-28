@@ -4565,24 +4565,22 @@ async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
             pass
         return
 
-    # Check if room number already exists
+    # Reject if room number already active
     room_key = str(room_number)
     if room_key in rooms:
-        existing_cid = rooms[room_key].get('channel_id')
-        if str(existing_cid) == str(channel_id):
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=update.effective_chat.id,
-                    message_id=status_msg.message_id,
-                    text=(
-                        "<b>📌 Mark Active</b>\n\n"
-                        f"Room {room_number} is already active with this group."
-                    ),
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
-            return
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Room {room_number} is already active. Cannot add duplicate."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
 
     # Check admins in the group
     admin_info = []
@@ -4621,12 +4619,6 @@ async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
         invite_link = invite.link
     except Exception:
         pass
-
-    # Store old room if replacing
-    if room_key in rooms:
-        old_cid = rooms[room_key].get('channel_id')
-        if old_cid:
-            add_old_room(old_cid, f"Crypto India Escrow Room {room_number}")
 
     # Register the room
     rooms[room_key] = {
