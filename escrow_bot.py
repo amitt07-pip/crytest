@@ -73,6 +73,7 @@ GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
+OLD_ROOMS_FILE = "old_rooms.json"
 USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
@@ -368,6 +369,28 @@ def load_rooms():
 def save_rooms():
     with open(ROOMS_FILE, "w") as f:
         json.dump(rooms, f)
+
+
+old_rooms = []
+
+def load_old_rooms():
+    global old_rooms
+    try:
+        with open(OLD_ROOMS_FILE, "r") as f:
+            old_rooms = json.load(f)
+    except FileNotFoundError:
+        old_rooms = []
+
+def save_old_rooms():
+    with open(OLD_ROOMS_FILE, "w") as f:
+        json.dump(old_rooms, f)
+
+def add_old_room(channel_id, title=""):
+    """Store an old room's channel ID for later deletion."""
+    entry = {"channel_id": int(channel_id), "title": title}
+    if not any(r["channel_id"] == int(channel_id) for r in old_rooms):
+        old_rooms.append(entry)
+        save_old_rooms()
 
 
 def load_banned_users():
@@ -4402,6 +4425,9 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for room_number, action in all_to_fix:
             room_key = str(room_number)
             if action == "recreate" and room_key in rooms:
+                old_cid = rooms[room_key].get('channel_id')
+                if old_cid:
+                    add_old_room(old_cid, f"Crypto India Escrow Room {room_number}")
                 del rooms[room_key]
                 save_rooms()
 
@@ -5010,6 +5036,10 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     room_count = len(rooms)
+    for room_data in rooms.values():
+        old_cid = room_data.get('channel_id')
+        if old_cid:
+            add_old_room(old_cid, f"Crypto India Escrow Room {room_data.get('room_number', '?')}")
     rooms = {}
     save_rooms()
 
@@ -5027,8 +5057,8 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delete_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Delete all old rooms — removes Telegram groups and clears room data."""
-    global userbot_client, rooms
+    """Delete old escrow room groups using stored channel IDs, keeping current active rooms."""
+    global userbot_client
 
     user_id = update.effective_user.id
     if user_id not in ADMIN_USER_IDS:
@@ -5037,68 +5067,65 @@ async def delete_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    room_count = len(rooms)
-    if room_count == 0:
+    if not old_rooms:
         await update.message.reply_text(
-            "<b>🗑️ Delete Rooms</b>\n\n"
-            "No rooms to delete.",
+            "<b>🗑️ Delete Old Rooms</b>\n\n"
+            "✅ No old rooms to delete.",
             parse_mode="HTML"
         )
         return
 
+    total = len(old_rooms)
     status_msg = await update.message.reply_text(
-        f"<b>🗑️ Delete Rooms</b>\n\n"
-        f"🔄 Deleting <b>0</b>/{room_count}...",
+        f"<b>🗑️ Delete Old Rooms</b>\n\n"
+        f"🔄 Deleting <b>0</b>/{total}...",
         parse_mode="HTML"
     )
 
     deleted_count = 0
     failed_count = 0
-    for i, (room_key, room_data) in enumerate(list(rooms.items()), 1):
-        channel_id = room_data.get('channel_id')
+    from telethon.tl.functions.channels import DeleteChannelRequest
+    for i, entry in enumerate(list(old_rooms), 1):
+        cid = entry["channel_id"]
+        title = entry.get("title", f"ID:{cid}")
 
-        if i % 5 == 1:
+        if i % 5 == 1 and i > 1:
             try:
                 await context.bot.edit_message_text(
                     chat_id=update.effective_chat.id,
                     message_id=status_msg.message_id,
                     text=(
-                        f"<b>🗑️ Delete Rooms</b>\n\n"
-                        f"🔄 Deleting <b>{i}</b>/{room_count}..."
+                        f"<b>🗑️ Delete Old Rooms</b>\n\n"
+                        f"🔄 Deleting <b>{i}</b>/{total}..."
                     ),
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-        if channel_id:
-            try:
-                full_channel_id = int(f"-100{channel_id}")
-                from telethon.tl.functions.channels import DeleteChannelRequest
-                await userbot_client(DeleteChannelRequest(channel=full_channel_id))
-                deleted_count += 1
-            except Exception as e:
-                log_warning(f"Room {room_key}: Could not delete group - {e}")
-                failed_count += 1
-        else:
+        try:
+            await userbot_client(DeleteChannelRequest(channel=int(f"-100{cid}")))
+            deleted_count += 1
+            log_info(f"Deleted old group: {title} (ID: {cid})")
+        except Exception as e:
+            log_warning(f"Could not delete '{title}' (ID: {cid}) - {e}")
             failed_count += 1
 
         await asyncio.sleep(1)
 
-    rooms.clear()
-    save_rooms()
-    log_info(f"All rooms deleted by admin {user_id}")
+    old_rooms.clear()
+    save_old_rooms()
 
     try:
         await context.bot.edit_message_text(
             chat_id=update.effective_chat.id,
             message_id=status_msg.message_id,
             text=(
-                f"<b>🗑️ Delete Rooms</b>\n\n"
+                f"<b>🗑️ Delete Old Rooms</b>\n\n"
                 f"✅ <b>Complete</b>\n\n"
                 f"  ↳ Deleted: <b>{deleted_count}</b>\n"
                 f"  ↳ Failed: <b>{failed_count}</b>\n"
-                f"  ↳ Remaining: <b>{len(rooms)}</b>"
+                f"  ↳ Active (kept): <b>{len(rooms)}</b>"
             ),
             parse_mode="HTML"
         )
@@ -5125,7 +5152,11 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
-    # Clear existing rooms data to stop using old groups
+    # Store current room channel IDs as old rooms before clearing
+    for room_data in rooms.values():
+        old_cid = room_data.get('channel_id')
+        if old_cid:
+            add_old_room(old_cid, f"Crypto India Escrow Room {room_data.get('room_number', '?')}")
     rooms.clear()
     save_rooms()
     log_info("Cleared all existing room data")
@@ -6204,6 +6235,7 @@ async def main():
     load_group_data()
     load_deals()
     load_rooms()
+    load_old_rooms()
     load_banned_users()
     load_user_2fa()
     load_deal_form_cache()
