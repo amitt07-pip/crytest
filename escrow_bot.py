@@ -2621,18 +2621,20 @@ async def handle_callback(
         canceller_id = query.from_user.id
         canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
         if username == seller_clean:
-            canceller_role = "Seller"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
             other_username = deal['buyer'].lstrip('@')
-            other_role = "Buyer"
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         elif username == buyer_clean:
-            canceller_role = "Buyer"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
             other_username = deal['seller'].lstrip('@')
-            other_role = "Seller"
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         else:
-            canceller_role = "Admin"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
             other_username = None
-            other_role = None
-        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
+            other_role_link = None
+            other_link = None
 
         if deal_id in active_monitors:
             del active_monitors[deal_id]
@@ -2647,22 +2649,26 @@ async def handle_callback(
         if other_link:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"{other_link} [{other_role}] the deal has been "
-                f"cancelled by {canceller_link} [{canceller_role}]."
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
         else:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
             )
 
+        # Remove buttons from original message
         try:
-            await query.edit_message_text(
-                text=cancel_text,
-                parse_mode="HTML"
-            )
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML"
+        )
         return
 
     if data.startswith("adminconfirm_"):
@@ -2786,18 +2792,20 @@ async def handle_callback(
         canceller_id = query.from_user.id
         canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
         if username == seller_clean:
-            canceller_role = "Seller"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
             other_username = deal['buyer'].lstrip('@')
-            other_role = "Buyer"
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         elif username == buyer_clean:
-            canceller_role = "Buyer"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
             other_username = deal['seller'].lstrip('@')
-            other_role = "Seller"
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         else:
-            canceller_role = "Admin"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
             other_username = None
-            other_role = None
-        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
+            other_role_link = None
+            other_link = None
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -2809,22 +2817,26 @@ async def handle_callback(
         if other_link:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"{other_link} [{other_role}] the deal has been "
-                f"cancelled by {canceller_link} [{canceller_role}]."
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
         else:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
             )
 
+        # Remove buttons from original message
         try:
-            await query.edit_message_text(
-                text=cancel_text,
-                parse_mode="HTML"
-            )
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML"
+        )
         return
 
     if data.startswith("release_") and not data.startswith("release_confirm_"):
@@ -2957,12 +2969,14 @@ async def handle_callback(
 
         if deal_id not in deals:
             try:
-                await query.edit_message_text(
-                    text="Deal has been cancelled.",
-                    parse_mode="HTML"
-                )
+                await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
             return
 
         deal = deals[deal_id]
@@ -2977,18 +2991,20 @@ async def handle_callback(
         canceller_id = query.from_user.id
         canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
         if username == seller_clean:
-            canceller_role = "Seller"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
             other_username = deal['buyer'].lstrip('@')
-            other_role = "Buyer"
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         elif username == buyer_clean:
-            canceller_role = "Buyer"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
             other_username = deal['seller'].lstrip('@')
-            other_role = "Seller"
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
         else:
-            canceller_role = "Admin"
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
             other_username = None
-            other_role = None
-        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
+            other_role_link = None
+            other_link = None
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -3000,22 +3016,26 @@ async def handle_callback(
         if other_link:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"{other_link} [{other_role}] the deal has been "
-                f"cancelled by {canceller_link} [{canceller_role}]."
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
         else:
             cancel_text = (
                 f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
             )
 
+        # Remove buttons from original message
         try:
-            await query.edit_message_text(
-                text=cancel_text,
-                parse_mode="HTML"
-            )
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML"
+        )
         return
 
     # Handle changeaddy callbacks (admin changing escrow addresses)
@@ -5488,18 +5508,20 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     canceller_link = f'<a href="tg://user?id={user_id}">{first_name}</a>'
     if username == seller_clean:
-        canceller_role = "Seller"
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Seller</a>'
         other_username = deal['buyer'].lstrip('@')
-        other_role = "Buyer"
+        other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
     elif username == buyer_clean:
-        canceller_role = "Buyer"
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Buyer</a>'
         other_username = deal['seller'].lstrip('@')
-        other_role = "Seller"
+        other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
     else:
-        canceller_role = "Admin"
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Admin</a>'
         other_username = None
-        other_role = None
-    other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
+        other_role_link = None
+        other_link = None
 
     if active_deal_id in active_monitors:
         del active_monitors[active_deal_id]
@@ -5514,13 +5536,13 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if other_link:
         cancel_text = (
             f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
-            f"{other_link} [{other_role}] the deal has been "
-            f"cancelled by {canceller_link} [{canceller_role}]."
+            f"{other_link} [{other_role_link}] the deal has been "
+            f"cancelled by {canceller_link} [{canceller_role_link}]."
         )
     else:
         cancel_text = (
             f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
-            f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+            f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
         )
 
     await context.bot.send_message(
