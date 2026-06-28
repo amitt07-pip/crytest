@@ -4312,14 +4312,14 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
 
-    created_count = 0
-    recreated_count = 0
-    skipped_count = 0
+    # Phase 1: Verify all rooms
+    verified_count = 0
+    rooms_to_recreate = []
+    rooms_to_create = []
     for room_number in range(1, 21):
         room_key = str(room_number)
         expected_title = f"Crypto India Escrow Room {room_number}"
-        
-        # Update progress every 5 rooms
+
         if room_number % 5 == 1:
             try:
                 await context.bot.edit_message_text(
@@ -4327,92 +4327,114 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     message_id=status_msg.message_id,
                     text=(
                         f"<b>🔧 Setup Rooms</b>\n\n"
-                        f"🔄 Verifying rooms <b>{room_number - 1}</b>/20..."
+                        f"🔍 Verifying room <b>{room_number}</b>/20..."
                     ),
                     parse_mode="HTML"
                 )
             except Exception:
                 pass
 
-        # Check if room exists in our records
-        if room_key in rooms:
-            room_data = rooms[room_key]
-            channel_id = room_data.get('channel_id')
-            if channel_id:
-                needs_recreate = False
-                reason = ""
-                try:
-                    full_channel_id = int(f"-100{channel_id}")
-                    entity = await userbot_client.get_entity(full_channel_id)
-
-                    # Check group name matches expected room number
-                    group_title = getattr(entity, 'title', '') or ''
-                    if group_title != expected_title:
-                        needs_recreate = True
-                        reason = f"name mismatch ('{group_title}' != '{expected_title}')"
-
-                    # Check admin IDs are present in the group
-                    if not needs_recreate:
-                        try:
-                            from telethon.tl.functions.channels import GetParticipantsRequest
-                            from telethon.tl.types import ChannelParticipantsAdmins
-                            admins_result = await userbot_client(GetParticipantsRequest(
-                                channel=full_channel_id,
-                                filter=ChannelParticipantsAdmins(),
-                                offset=0,
-                                limit=100,
-                                hash=0
-                            ))
-                            admin_ids_in_group = {u.id for u in admins_result.users}
-                            missing_admins = [aid for aid in ADMIN_USER_IDS if aid not in admin_ids_in_group]
-                            if missing_admins:
-                                needs_recreate = True
-                                reason = f"missing admin IDs: {missing_admins}"
-                        except Exception as admin_err:
-                            log_warning(f"Room {room_number}: Could not check admins - {admin_err}")
-
-                    if not needs_recreate:
-                        skipped_count += 1
-                        continue
-
-                    log_warning(f"Room {room_number} invalid ({reason}), recreating")
-                    del rooms[room_key]
-                    save_rooms()
-                    recreated_count += 1
-
-                except Exception as e:
-                    log_warning(f"Room {room_number} group not accessible, recreating: {e}")
-                    del rooms[room_key]
-                    save_rooms()
-                    recreated_count += 1
-
-        try:
-            invite_link, room_num, channel_id = await create_escrow_group(
-                room_number,
-                "@setup",
-                "@setup",
-                bot_username
-            )
-
-            if invite_link and channel_id:
-                rooms[str(room_number)] = {
-                    "room_number": room_number,
-                    "channel_id": channel_id,
-                    "invite_link": invite_link,
-                    "status": "free",
-                    "current_deal_id": None,
-                    "sender_user": None,
-                    "mentioned_user": None
-                }
-                save_rooms()
-                created_count += 1
-                log_info(f"Room {room_number} created")
-
-            await asyncio.sleep(2)
-
-        except Exception as e:
-            log_error(f"Room {room_number}: Setup failed - {e}")
+        if room_key not in rooms:
+            rooms_to_create.append(room_number)
             continue
+
+        room_data = rooms[room_key]
+        channel_id = room_data.get('channel_id')
+        if not channel_id:
+            rooms_to_create.append(room_number)
+            continue
+
+        needs_recreate = False
+        try:
+            full_channel_id = int(f"-100{channel_id}")
+            entity = await userbot_client.get_entity(full_channel_id)
+
+            group_title = getattr(entity, 'title', '') or ''
+            if group_title != expected_title:
+                needs_recreate = True
+
+            if not needs_recreate:
+                try:
+                    from telethon.tl.functions.channels import GetParticipantsRequest
+                    from telethon.tl.types import ChannelParticipantsAdmins
+                    admins_result = await userbot_client(GetParticipantsRequest(
+                        channel=full_channel_id,
+                        filter=ChannelParticipantsAdmins(),
+                        offset=0,
+                        limit=100,
+                        hash=0
+                    ))
+                    admin_ids_in_group = {u.id for u in admins_result.users}
+                    missing_admins = [aid for aid in ADMIN_USER_IDS if aid not in admin_ids_in_group]
+                    if missing_admins:
+                        needs_recreate = True
+                except Exception:
+                    pass
+
+            if needs_recreate:
+                rooms_to_recreate.append(room_number)
+            else:
+                verified_count += 1
+
+        except Exception:
+            rooms_to_recreate.append(room_number)
+
+    # Phase 2: Recreate/create rooms that failed verification
+    created_count = 0
+    recreated_count = 0
+    all_to_fix = [(n, "recreate") for n in rooms_to_recreate] + [(n, "create") for n in rooms_to_create]
+
+    if all_to_fix:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text=(
+                    f"<b>🔧 Setup Rooms</b>\n\n"
+                    f"🔍 Verified: <b>{verified_count}</b>\n"
+                    f"🔄 Fixing <b>{len(all_to_fix)}</b> room(s)..."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+        for room_number, action in all_to_fix:
+            room_key = str(room_number)
+            if action == "recreate" and room_key in rooms:
+                del rooms[room_key]
+                save_rooms()
+
+            try:
+                invite_link, room_num, channel_id = await create_escrow_group(
+                    room_number,
+                    "@setup",
+                    "@setup",
+                    bot_username
+                )
+
+                if invite_link and channel_id:
+                    rooms[str(room_number)] = {
+                        "room_number": room_number,
+                        "channel_id": channel_id,
+                        "invite_link": invite_link,
+                        "status": "free",
+                        "current_deal_id": None,
+                        "sender_user": None,
+                        "mentioned_user": None
+                    }
+                    save_rooms()
+                    if action == "recreate":
+                        recreated_count += 1
+                    else:
+                        created_count += 1
+                    log_info(f"Room {room_number} {action}d")
+
+                await asyncio.sleep(2)
+
+            except Exception as e:
+                log_error(f"Room {room_number}: {action} failed - {e}")
+                continue
 
     try:
         await context.bot.edit_message_text(
@@ -4421,7 +4443,7 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=(
                 f"<b>🔧 Setup Rooms</b>\n\n"
                 f"✅ <b>Complete</b>\n\n"
-                f"  ↳ Verified: <b>{skipped_count}</b>\n"
+                f"  ↳ Verified: <b>{verified_count}</b>\n"
                 f"  ↳ New: <b>{created_count}</b>\n"
                 f"  ↳ Recreated: <b>{recreated_count}</b>\n"
                 f"  ↳ Total: <b>{len(rooms)}</b>"
