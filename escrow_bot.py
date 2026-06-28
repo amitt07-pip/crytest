@@ -5593,12 +5593,12 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>⚙️ ADDRESS CONFIGURATION</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>Usage:</b> <code>.setaddy [deal_id]</code>\n\n"
-            "<b>Example:</b> <code>.setaddy D1234</code>",
+            "<b>Example:</b> <code>.setaddy #D36432</code>",
             parse_mode="HTML"
         )
         return
 
-    deal_id = parts[1].split()[0].upper()
+    deal_id = parts[1].split()[0].strip("#").upper()
     if not deal_id.startswith("D"):
         deal_id = f"D{deal_id}"
 
