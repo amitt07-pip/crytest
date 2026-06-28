@@ -2611,10 +2611,28 @@ async def handle_callback(
 
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only the seller can cancel the deal!")
+        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
             return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role = "Seller"
+            other_username = deal['buyer'].lstrip('@')
+            other_role = "Buyer"
+        elif username == buyer_clean:
+            canceller_role = "Buyer"
+            other_username = deal['seller'].lstrip('@')
+            other_role = "Seller"
+        else:
+            canceller_role = "Admin"
+            other_username = None
+            other_role = None
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
 
         if deal_id in active_monitors:
             del active_monitors[deal_id]
@@ -2626,9 +2644,21 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"{other_link} [{other_role}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role}]."
+            )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+            )
+
         try:
             await query.edit_message_text(
-                text="Deal has been cancelled.",
+                text=cancel_text,
                 parse_mode="HTML"
             )
         except Exception:
@@ -2740,12 +2770,34 @@ async def handle_callback(
         deal_id = parts[1]
 
         user_id = query.from_user.id
-        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only admins can cancel!")
-            return
 
         if deal_id not in deals:
             return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
+
+        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role = "Seller"
+            other_username = deal['buyer'].lstrip('@')
+            other_role = "Buyer"
+        elif username == buyer_clean:
+            canceller_role = "Buyer"
+            other_username = deal['seller'].lstrip('@')
+            other_role = "Seller"
+        else:
+            canceller_role = "Admin"
+            other_username = None
+            other_role = None
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -2754,9 +2806,21 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"{other_link} [{other_role}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role}]."
+            )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+            )
+
         try:
             await query.edit_message_text(
-                text="Deal cancelled by admin.",
+                text=cancel_text,
                 parse_mode="HTML"
             )
         except Exception:
@@ -2903,10 +2967,28 @@ async def handle_callback(
 
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only the seller can cancel the deal!")
+        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
             return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role = "Seller"
+            other_username = deal['buyer'].lstrip('@')
+            other_role = "Buyer"
+        elif username == buyer_clean:
+            canceller_role = "Buyer"
+            other_username = deal['seller'].lstrip('@')
+            other_role = "Seller"
+        else:
+            canceller_role = "Admin"
+            other_username = None
+            other_role = None
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -2915,9 +2997,21 @@ async def handle_callback(
         del deals[deal_id]
         save_deals()
 
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"{other_link} [{other_role}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role}]."
+            )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+            )
+
         try:
             await query.edit_message_text(
-                text="Deal has been cancelled.",
+                text=cancel_text,
                 parse_mode="HTML"
             )
         except Exception:
@@ -5337,6 +5431,88 @@ def set_address_and_qr(currency, network, index, new_address, new_qr_filename):
     save_escrow_addresses()
 
 
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/cancel - Cancel the active deal in the current group."""
+    if update.effective_chat.type == "private":
+        return
+
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    user_id = user.id
+    username = user.username.lower() if user.username else None
+    first_name = user.first_name or "Unknown"
+
+    # Find active deal in this chat
+    active_deal_id = None
+    for deal_id, deal in deals.items():
+        if deal.get('chat_id') == chat_id:
+            active_deal_id = deal_id
+            break
+
+    if not active_deal_id:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="No active deal in this group.",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    deal = deals[active_deal_id]
+    seller_clean = deal['seller'].lstrip('@').lower()
+    buyer_clean = deal['buyer'].lstrip('@').lower()
+
+    if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Only the buyer or seller can cancel the deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    canceller_link = f'<a href="tg://user?id={user_id}">{first_name}</a>'
+    if username == seller_clean:
+        canceller_role = "Seller"
+        other_username = deal['buyer'].lstrip('@')
+        other_role = "Buyer"
+    elif username == buyer_clean:
+        canceller_role = "Buyer"
+        other_username = deal['seller'].lstrip('@')
+        other_role = "Seller"
+    else:
+        canceller_role = "Admin"
+        other_username = None
+        other_role = None
+    other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>' if other_username else ""
+
+    if active_deal_id in active_monitors:
+        del active_monitors[active_deal_id]
+
+    room_num = get_room_by_channel_id(chat_id)
+    if room_num:
+        mark_room_free(room_num)
+
+    del deals[active_deal_id]
+    save_deals()
+
+    if other_link:
+        cancel_text = (
+            f"<b><u>Deal</u></b> #{active_deal_id}\n"
+            f"{other_link} [{other_role}] the deal has been "
+            f"cancelled by {canceller_link} [{canceller_role}]."
+        )
+    else:
+        cancel_text = (
+            f"<b><u>Deal</u></b> #{active_deal_id}\n"
+            f"The deal has been cancelled by {canceller_link} [{canceller_role}]."
+        )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=cancel_text,
+        parse_mode="HTML"
+    )
+
+
 async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/changeaddy - Admin command to change escrow deposit addresses."""
     user_id = update.effective_user.id
@@ -5833,6 +6009,7 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
+    app.add_handler(CommandHandler("cancel", cancel_command))
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
