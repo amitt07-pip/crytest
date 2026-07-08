@@ -2,4 +2,5 @@ __pycache__/
 *.session
 *.pyc
 allowed_users.json
+force_escrow.json
 .env

@@ -77,6 +77,7 @@ OLD_ROOMS_FILE = "old_rooms.json"
 USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
+FORCE_ESCROW_FILE = "force_escrow.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -313,6 +314,7 @@ rooms = {}
 banned_users = {}
 user_2fa = {}
 deal_form_cache = {}
+force_escrow_users = {}
 
 
 def load_allowed_users():
@@ -434,6 +436,27 @@ def save_deal_form_cache():
     with open(DEAL_FORM_CACHE_FILE, "w") as f:
         json.dump(deal_form_cache, f)
 
+
+
+def load_force_escrow():
+    global force_escrow_users
+    try:
+        with open(FORCE_ESCROW_FILE, "r") as f:
+            force_escrow_users = json.load(f)
+    except FileNotFoundError:
+        force_escrow_users = {}
+
+
+def save_force_escrow():
+    with open(FORCE_ESCROW_FILE, "w") as f:
+        json.dump(force_escrow_users, f)
+
+
+def is_force_escrow_user(username):
+    """Check if a username is whitelisted to bypass the active-deal restriction."""
+    if not username:
+        return False
+    return username.lstrip('@').lower() in force_escrow_users
 
 
 def is_user_banned(user_id, username):
@@ -4111,6 +4134,48 @@ async def handle_chat_member_update(
         await send_form_messages(context, chat_id, mentioned, sender)
 
 
+async def forceescrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/forceescrow @username - Whitelist a user to bypass the active-deal restriction in /escrow."""
+    global force_escrow_users
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Admin only
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Usage: /forceescrow @username",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    target = context.args[0].lstrip('@').lower()
+    if not target:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Usage: /forceescrow @username",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    force_escrow_users[target] = {
+        "added_by": user_id,
+        "added_at": datetime.now().isoformat()
+    }
+    save_force_escrow()
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ @{target} can now create unlimited escrows without the active deal restriction.",
+        reply_to_message_id=update.message.message_id
+    )
+    log_info(f"@{target} added to force escrow list by admin {user_id}")
+
+
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global userbot_client
     # Only work in groups, not DMs
@@ -4152,29 +4217,31 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sender_username = f"@{sender}" if sender else "User"
 
-    # Check if sender has an active escrow deal
-    active_user, active_link = get_user_active_deal(sender_username)
-    if active_user:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_to_message_id=update.message.message_id
-        )
-        return
+    # Check if sender has an active escrow deal (force-escrow users bypass this)
+    if not is_force_escrow_user(sender_username):
+        active_user, active_link = get_user_active_deal(sender_username)
+        if active_user:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_to_message_id=update.message.message_id
+            )
+            return
 
-    # Check if mentioned user has an active escrow deal
-    active_user, active_link = get_user_active_deal(mentioned_user)
-    if active_user:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_to_message_id=update.message.message_id
-        )
-        return
+    # Check if mentioned user has an active escrow deal (force-escrow users bypass this)
+    if not is_force_escrow_user(mentioned_user):
+        active_user, active_link = get_user_active_deal(mentioned_user)
+        if active_user:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_to_message_id=update.message.message_id
+            )
+            return
 
     # Get mentioned user's ID using userbot
     if userbot_client is None:
@@ -6512,6 +6579,7 @@ async def main():
     load_banned_users()
     load_user_2fa()
     load_deal_form_cache()
+    load_force_escrow()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -6547,6 +6615,7 @@ async def main():
     app.bot._do_post = _delayed_do_post
     # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
+    app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
     app.add_handler(CommandHandler("set2fa", set_2fa))
