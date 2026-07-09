@@ -749,7 +749,9 @@ async def check_user_banned_in_room(user_id, channel_id):
         await init_userbot()
     
     try:
-        full_channel_id = int(f"-100{channel_id}")
+        full_channel_id = get_marked_peer_id(channel_id)
+        if full_channel_id is None:
+            return False
         from telethon.tl.functions.channels import GetParticipantRequest
         from telethon.tl.types import ChannelParticipantBanned
         try:
@@ -766,6 +768,25 @@ async def check_user_banned_in_room(user_id, channel_id):
         return False
 
 
+def get_marked_peer_id(channel_id):
+    """Normalize a stored room channel id to a Telethon marked peer id."""
+    if channel_id is None:
+        return None
+
+    channel_str = str(channel_id).strip()
+    if not channel_str:
+        return None
+    if channel_str.startswith("-100"):
+        try:
+            return int(channel_str)
+        except ValueError:
+            return None
+    try:
+        return int(f"-100{channel_str.lstrip('-')}")
+    except ValueError:
+        return None
+
+
 async def get_free_room_for_users(sender_user_id, mentioned_user_id):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
@@ -778,7 +799,9 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id):
             if channel_id:
                 # First verify the group still exists
                 try:
-                    full_channel_id = int(f"-100{channel_id}")
+                    full_channel_id = get_marked_peer_id(channel_id)
+                    if full_channel_id is None:
+                        raise ValueError("Invalid channel_id")
                     await userbot_client.get_entity(full_channel_id)
                 except Exception:
                     # Group doesn't exist, skip this room
@@ -1940,10 +1963,11 @@ async def create_escrow_group(
                             break
 
             if channel_id is None:
-                channel_id = chat_id
+                log_error(f"Room {room_number}: Could not resolve migrated channel_id")
+                return None, room_number, None
         except Exception as migrate_error:
             log_warning(f"Room {room_number}: Migration error - {migrate_error}")
-            channel_id = chat_id
+            return None, room_number, None
 
         try:
             await userbot_client(EditChatAboutRequest(
@@ -4442,7 +4466,9 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         needs_recreate = False
         try:
-            full_channel_id = int(f"-100{channel_id}")
+            full_channel_id = get_marked_peer_id(channel_id)
+            if full_channel_id is None:
+                raise ValueError("Invalid channel_id")
             entity = await userbot_client.get_entity(full_channel_id)
 
             group_title = getattr(entity, 'title', '') or ''
@@ -6361,7 +6387,10 @@ async def review_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         group_exists = False
         if channel_id and userbot_client:
             try:
-                entity = await userbot_client.get_entity(int(f"-100{channel_id}"))
+                full_channel_id = get_marked_peer_id(channel_id)
+                if full_channel_id is None:
+                    raise ValueError("Invalid channel_id")
+                await userbot_client.get_entity(full_channel_id)
                 group_exists = True
             except Exception:
                 group_exists = False
