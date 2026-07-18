@@ -768,6 +768,21 @@ async def check_user_banned_in_room(user_id, channel_id):
         return False
 
 
+def entity_has_username(entity):
+    """Return True if a Telethon user entity has any active username.
+
+    Accounts for the newer multiple/collectible usernames feature where the
+    primary `username` field may be None while active usernames live in the
+    `usernames` list.
+    """
+    if getattr(entity, 'username', None):
+        return True
+    for u in getattr(entity, 'usernames', None) or []:
+        if getattr(u, 'active', False) and getattr(u, 'username', None):
+            return True
+    return False
+
+
 def get_marked_peer_id(channel_id):
     """Normalize a stored room channel id to a Telethon marked peer id."""
     if channel_id is None:
@@ -4277,8 +4292,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_clean = mentioned_user.lstrip("@")
         mentioned_entity = await userbot_client.get_entity(mentioned_clean)
         mentioned_user_id = mentioned_entity.id
-        # Check if mentioned user has a username
-        if not getattr(mentioned_entity, 'username', None):
+        # Check if mentioned user has a username (account for multiple/collectible usernames)
+        if not entity_has_username(mentioned_entity):
             mentioned_has_username = False
     except Exception as e:
         log_warning(f"Could not get mentioned user ID: {e}")
