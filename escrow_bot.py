@@ -256,7 +256,7 @@ usdc_sol_address_index = 0
 # Key: user_id, Value: dict with slot, currency, network, step
 changeaddy_sessions = {}
 
-ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
+ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069]
 
 # Extra admin added to every newly created escrow group (resolved by ID, phone fallback)
 EXTRA_ADMIN_USER_ID = 6302273200
