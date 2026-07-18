@@ -4227,6 +4227,7 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if sender has a username
     if not sender:
+        log_warning(f"/escrow blocked: sender {user_id} has no username")
         await context.bot.send_message(
             chat_id=chat_id,
             text="You need a username to deal!",
@@ -4302,6 +4303,10 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if mentioned user has a username
     if not mentioned_has_username:
+        log_warning(
+            f"/escrow blocked: mentioned user {mentioned_user} "
+            f"(id={mentioned_user_id}) has no detectable username"
+        )
         await context.bot.send_message(
             chat_id=chat_id,
             text="You need a username to deal!",
