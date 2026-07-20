@@ -5098,7 +5098,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         userbot_me = await userbot_client.get_me()
         userbot_id = userbot_me.id
 
-        protected_ids = set([bot_id, userbot_id, 6662820986])
+        protected_ids = set([bot_id, userbot_id, 6662820986, EXTRA_ADMIN_USER_ID])
 
         try:
             from telethon.tl.functions.channels import GetParticipantsRequest
