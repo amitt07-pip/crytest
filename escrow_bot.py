@@ -820,6 +820,44 @@ def room_has_active_deal(channel_id):
     return False
 
 
+def protected_from_removal_ids(bot_id, userbot_id):
+    """IDs that must never be kicked/banned from escrow rooms."""
+    return set(ADMIN_USER_IDS) | {bot_id, userbot_id}
+
+
+async def resolve_extra_admin(client):
+    """Resolve the extra-admin user via ID, username, or phone (with contact import).
+
+    Returns the Telethon user entity, or None if it cannot be resolved.
+    """
+    for label, identifier in (
+        ("id", EXTRA_ADMIN_USER_ID),
+        ("username", EXTRA_ADMIN_USERNAME),
+        ("phone", EXTRA_ADMIN_PHONE),
+    ):
+        try:
+            entity = await client.get_entity(identifier)
+            if entity is not None:
+                return entity
+        except Exception as e:
+            log_warning(f"Extra admin resolve by {label} failed: {e}")
+    try:
+        imported = await client(ImportContactsRequest(
+            contacts=[InputPhoneContact(
+                client_id=0,
+                phone=EXTRA_ADMIN_PHONE,
+                first_name="Escrow",
+                last_name="Admin"
+            )]
+        ))
+        if imported.users:
+            return imported.users[0]
+        log_warning("Extra admin phone import returned no users")
+    except Exception as e:
+        log_warning(f"Extra admin phone import failed: {e}")
+    return None
+
+
 async def get_free_room_for_users(sender_user_id, mentioned_user_id):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
@@ -2130,42 +2168,25 @@ async def create_escrow_group(
                 manage_call=True,
                 other=True
             )
-            extra_admin_entity = None
-            for identifier in (EXTRA_ADMIN_USER_ID, EXTRA_ADMIN_USERNAME, EXTRA_ADMIN_PHONE):
-                try:
-                    extra_admin_entity = await userbot_client.get_entity(identifier)
-                    break
-                except Exception:
-                    continue
-            if extra_admin_entity is None:
-                # Fallback: import the phone number as a contact to resolve the user
-                try:
-                    imported = await userbot_client(ImportContactsRequest(
-                        contacts=[InputPhoneContact(
-                            client_id=0,
-                            phone=EXTRA_ADMIN_PHONE,
-                            first_name="Escrow",
-                            last_name="Admin"
-                        )]
-                    ))
-                    if imported.users:
-                        extra_admin_entity = imported.users[0]
-                except Exception:
-                    pass
+            extra_admin_entity = await resolve_extra_admin(userbot_client)
             if extra_admin_entity is not None:
                 try:
                     await userbot_client(InviteToChannelRequest(
                         channel=channel_id,
                         users=[extra_admin_entity]
                     ))
-                except Exception:
-                    pass
-                await userbot_client(EditAdminRequest(
-                    channel=channel_id,
-                    user_id=extra_admin_entity.id,
-                    admin_rights=extra_admin_rights,
-                    rank="Admin"
-                ))
+                except Exception as invite_err:
+                    log_warning(f"Room {room_number}: Could not invite extra admin - {invite_err}")
+                try:
+                    await userbot_client(EditAdminRequest(
+                        channel=channel_id,
+                        user_id=extra_admin_entity.id,
+                        admin_rights=extra_admin_rights,
+                        rank="Admin"
+                    ))
+                    log_info(f"Room {room_number}: Extra admin {extra_admin_entity.id} promoted")
+                except Exception as promote_err:
+                    log_warning(f"Room {room_number}: Could not promote extra admin - {promote_err}")
             else:
                 log_warning(f"Room {room_number}: Could not resolve extra admin")
         except Exception as extra_admin_error:
@@ -4580,8 +4601,9 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                         hash=0
                     ))
                     admin_ids_in_group = {u.id for u in admins_result.users}
-                    # Check bot and userbot are admins (7338429782 is not mandatory)
-                    missing = [rid for rid in [bot_id, userbot_id] if rid not in admin_ids_in_group]
+                    # Bot, userbot and the extra admin must all be admins
+                    required_admins = [bot_id, userbot_id, EXTRA_ADMIN_USER_ID]
+                    missing = [rid for rid in required_admins if rid not in admin_ids_in_group]
                     if missing:
                         needs_recreate = True
                 except Exception:
@@ -5119,7 +5141,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         userbot_me = await userbot_client.get_me()
         userbot_id = userbot_me.id
 
-        protected_ids = set([bot_id, userbot_id, 6662820986, EXTRA_ADMIN_USER_ID])
+        protected_ids = protected_from_removal_ids(bot_id, userbot_id)
 
         try:
             from telethon.tl.functions.channels import GetParticipantsRequest
@@ -5414,7 +5436,7 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = bot_info.id
     userbot_me = await userbot_client.get_me()
     userbot_id = userbot_me.id
-    protected_ids = set([bot_id, userbot_id, 6662820986])
+    protected_ids = protected_from_removal_ids(bot_id, userbot_id)
 
     # Clear ALL deals and group_data so users don't get "active escrow" errors
     cleared_deals = len(deals)
