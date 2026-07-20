@@ -256,10 +256,12 @@ usdc_sol_address_index = 0
 # Key: user_id, Value: dict with slot, currency, network, step
 changeaddy_sessions = {}
 
-ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069]
+ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 
-# Extra admin added to every newly created escrow group (resolved by ID, phone fallback)
+# Extra admin added to every newly created escrow group (resolved by ID, then
+# username, then phone). ID is the source of truth; username may change.
 EXTRA_ADMIN_USER_ID = 6302273200
+EXTRA_ADMIN_USERNAME = "iUsrXD"
 EXTRA_ADMIN_PHONE = "+918288914135"
 
 DEAL_LOG_CHANNEL_ID = -1003266978268
@@ -2129,7 +2131,7 @@ async def create_escrow_group(
                 other=True
             )
             extra_admin_entity = None
-            for identifier in (EXTRA_ADMIN_USER_ID, EXTRA_ADMIN_PHONE):
+            for identifier in (EXTRA_ADMIN_USER_ID, EXTRA_ADMIN_USERNAME, EXTRA_ADMIN_PHONE):
                 try:
                     extra_admin_entity = await userbot_client.get_entity(identifier)
                     break
