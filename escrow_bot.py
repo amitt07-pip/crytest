@@ -264,6 +264,11 @@ EXTRA_ADMIN_USER_ID = 6302273200
 EXTRA_ADMIN_USERNAME = "iUsrXD"
 EXTRA_ADMIN_PHONE = "+918288914135"
 
+# Only these admins are treated as admins for deal cancellation (the ones that
+# stay in the group after /clean and .empty). Every other admin is treated as a
+# normal user for cancel purposes (can only cancel a deal they're a party to).
+CANCEL_ADMIN_IDS = [6662820986, EXTRA_ADMIN_USER_ID]
+
 DEAL_LOG_CHANNEL_ID = -1003266978268
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
@@ -2792,7 +2797,7 @@ async def handle_callback(
         seller_clean = deal['seller'].lstrip('@').lower()
         buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only the buyer or seller can cancel the deal!")
             return
 
@@ -2928,7 +2933,7 @@ async def handle_callback(
         deal_id = parts[1]
 
         user_id = query.from_user.id
-        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
+        if user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only admins can cancel!")
             return
 
@@ -2964,7 +2969,7 @@ async def handle_callback(
         seller_clean = deal['seller'].lstrip('@').lower()
         buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only the buyer or seller can cancel the deal!")
             return
 
@@ -3164,7 +3169,7 @@ async def handle_callback(
         seller_clean = deal['seller'].lstrip('@').lower()
         buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only the buyer or seller can cancel the deal!")
             return
 
@@ -6190,7 +6195,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     seller_clean = deal['seller'].lstrip('@').lower()
     buyer_clean = deal['buyer'].lstrip('@').lower()
 
-    if username != seller_clean and username != buyer_clean and user_id not in ADMIN_USER_IDS:
+    if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
         await context.bot.send_message(
             chat_id=chat_id,
             text="Only the buyer or seller can cancel the deal!",
