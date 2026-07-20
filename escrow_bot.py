@@ -807,6 +807,17 @@ def get_marked_peer_id(channel_id):
         return None
 
 
+def room_has_active_deal(channel_id):
+    """Return True if a room's channel has a deal that isn't finished."""
+    channel_id_str = str(channel_id).replace("-100", "") if str(channel_id).startswith("-100") else str(channel_id)
+    finished = ('completed', 'cancelled', 'released', 'payment_released')
+    for deal in deals.values():
+        if str(deal.get('channel_id')) == channel_id_str:
+            if deal.get('status', '') not in finished:
+                return True
+    return False
+
+
 async def get_free_room_for_users(sender_user_id, mentioned_user_id):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
@@ -4578,6 +4589,14 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 rooms_to_recreate.append(room_number)
             else:
                 verified_count += 1
+                # Make the verified room usable by /escrow: clear stale busy
+                # status when no unfinished deal is tied to it.
+                if room_data.get('status') != 'free' and not room_has_active_deal(channel_id):
+                    room_data['status'] = 'free'
+                    room_data['current_deal_id'] = None
+                    room_data['sender_user'] = None
+                    room_data['mentioned_user'] = None
+                    save_rooms()
 
         except Exception:
             rooms_to_recreate.append(room_number)
