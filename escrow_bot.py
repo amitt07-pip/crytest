@@ -313,6 +313,8 @@ POLYGON_RPC_ENDPOINTS = [
     "https://polygon.llamarpc.com",
 ]
 
+CONFIRMATION_TARGET = 30
+
 # ERC20 Transfer event topic (keccak256 of "Transfer(address,address,uint256)")
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -1388,6 +1390,51 @@ def build_deal_summary(deal, deal_id, both_confirmed=False):
     return msg
 
 
+async def get_evm_block_number(base_network):
+    """Get the latest EVM block number using configured RPC fallbacks."""
+    if base_network == "BSC":
+        rpc_endpoints = BSC_RPC_ENDPOINTS
+    elif base_network == "POLYGON":
+        rpc_endpoints = POLYGON_RPC_ENDPOINTS
+    else:
+        return None
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    block_payload = {
+        "jsonrpc": "2.0",
+        "method": "eth_blockNumber",
+        "params": [],
+        "id": 1
+    }
+
+    for rpc_endpoint in rpc_endpoints:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    rpc_endpoint,
+                    json=block_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(
+                            f"{base_network} RPC {rpc_endpoint} error getting block number: "
+                            f"{response.status}"
+                        )
+                        continue
+                    data = await response.json()
+                    if "error" in data:
+                        log_warning(f"{base_network} RPC {rpc_endpoint} error: {data['error']}")
+                        continue
+                    return int(data["result"], 16)
+        except asyncio.TimeoutError:
+            log_warning(f"{base_network} RPC {rpc_endpoint} timeout")
+        except Exception as e:
+            log_warning(f"{base_network} RPC {rpc_endpoint} error: {e}")
+
+    log_warning(f"All {base_network} RPC endpoints failed getting block number")
+    return None
+
+
 async def check_bsc_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
     """Check BSC blockchain for USDT transactions to deposit address using RPC.
     
@@ -1763,10 +1810,10 @@ def get_deal_buttons(deal_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-def build_payment_detected_message(deal_id, amount, total, deal_amount, curr):
+def build_payment_detected_message(
+    deal_id, amount, total, deal_amount, curr, confirmations
+):
     """Build payment detected message."""
-    confirmations = "48/30"
-
     msg = (
         f"<b><i>Deal</i></b> #{deal_id}\n\n"
         f"<b>Payment Detected Successfully</b>\n\n"
@@ -1879,6 +1926,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
     monitoring_start_time = deal.get('monitoring_start_time')
     start_time = asyncio.get_event_loop().time()
     check_interval = 30
+    confirmation_check_interval = 5
     max_duration = 300
 
     log_info(f"Starting blockchain monitoring for deal {deal_id}: network={network}, address={deposit_address}, amount={deal_amount} {currency}")
@@ -1894,30 +1942,112 @@ async def monitor_blockchain(deal_id, chat_id, bot):
 
         total_received = 0
         latest_amount = 0
+        detected_transactions = []
 
         for tx in transactions:
             if tx.get("to", "").lower() == deposit_address.lower():
+                detected_transactions.append(tx)
                 amount = parse_transaction_amount(tx, network)
                 total_received += amount
                 if amount > latest_amount:
                     latest_amount = amount
 
         if total_received > 0:
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
             deal['received_amount'] = total_received
-            deal['status'] = 'payment_received'
             save_deals()
 
             # Update deal log - Deposit Detected with amount
             await update_deal_log(bot, deal_id, f"Deposit Detected [ {total_received} {currency} ]")
 
+            base_network = network.replace("USDC_", "") if network.startswith("USDC_") else network
+            detected_tx_block = None
+            initial_confirmations = CONFIRMATION_TARGET
+            if base_network in ("BSC", "POLYGON"):
+                block_numbers = []
+                for tx in detected_transactions:
+                    try:
+                        block_numbers.append(int(tx.get("blockNumber", "0")))
+                    except (TypeError, ValueError):
+                        continue
+                if block_numbers:
+                    detected_tx_block = max(block_numbers)
+
+                latest_block = await get_evm_block_number(base_network)
+                if latest_block is None or detected_tx_block is None:
+                    initial_confirmations = 1
+                else:
+                    initial_confirmations = max(
+                        1, latest_block - detected_tx_block + 1
+                    )
+
             detected_msg = build_payment_detected_message(
-                deal_id, latest_amount, total_received, deal_amount, currency
+                deal_id,
+                latest_amount,
+                total_received,
+                deal_amount,
+                currency,
+                f"{initial_confirmations}/{CONFIRMATION_TARGET}"
             )
-            await bot.send_message(
+            sent_detected = await bot.send_message(
                 chat_id=chat_id,
                 text=detected_msg,
                 parse_mode="HTML"
             )
+
+            confirmations = initial_confirmations
+            confirmed = base_network == "SOL" or confirmations >= CONFIRMATION_TARGET
+            while not confirmed:
+                if deal_id not in active_monitors or deal_id not in deals:
+                    return
+
+                await asyncio.sleep(confirmation_check_interval)
+
+                if deal_id not in active_monitors or deal_id not in deals:
+                    return
+
+                latest_block = await get_evm_block_number(base_network)
+                if latest_block is None or detected_tx_block is None:
+                    continue
+
+                new_confirmations = max(
+                    1, latest_block - detected_tx_block + 1
+                )
+                if new_confirmations != confirmations:
+                    confirmations = new_confirmations
+                    updated_detected_msg = build_payment_detected_message(
+                        deal_id,
+                        latest_amount,
+                        total_received,
+                        deal_amount,
+                        currency,
+                        f"{confirmations}/{CONFIRMATION_TARGET}"
+                    )
+                    try:
+                        await bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=sent_detected.message_id,
+                            text=updated_detected_msg,
+                            parse_mode="HTML"
+                        )
+                    except Exception as edit_error:
+                        if "message is not modified" not in str(edit_error).lower():
+                            log_warning(
+                                f"Could not update payment confirmations for deal "
+                                f"{deal_id}: {edit_error}"
+                            )
+
+                if confirmations >= CONFIRMATION_TARGET:
+                    confirmed = True
+
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
+            deal = deals[deal_id]
+            deal['status'] = 'payment_received'
+            save_deals()
 
             # Update deal log - Payment Received
             await update_deal_log(bot, deal_id, "Payment Received")
@@ -2889,7 +3019,7 @@ async def handle_callback(
             pass
 
         detected_msg = build_payment_detected_message(
-            deal_id, deal_amount, deal_amount, str(deal_amount), currency
+            deal_id, deal_amount, deal_amount, str(deal_amount), currency, "30/30"
         )
         await context.bot.send_message(
             chat_id=query.message.chat_id,
