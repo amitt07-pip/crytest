@@ -1910,6 +1910,41 @@ async def update_current_stage_button(bot, deal, chat_id, new_msg_id):
         pass
 
 
+async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount):
+    """Send the post-confirmation payment messages."""
+    await update_deal_log(bot, deal_id, "Payment Received")
+
+    received_msg = build_usdt_received_message(
+        deal, deal_id, received_amount
+    )
+    await bot.send_message(
+        chat_id=chat_id,
+        text=received_msg,
+        parse_mode="HTML",
+        reply_markup=get_deal_buttons(deal_id)
+    )
+
+    payment_type = deal.get('payment_details_type', 'text')
+    if payment_type == 'photo':
+        photo_id = deal.get('payment_details')
+        details_msg = build_payment_details_message(deal, deal_id)
+        sent_details = await bot.send_photo(
+            chat_id=chat_id,
+            photo=photo_id,
+            caption=details_msg,
+            parse_mode="HTML"
+        )
+    else:
+        details_msg = build_payment_details_message(deal, deal_id)
+        sent_details = await bot.send_message(
+            chat_id=chat_id,
+            text=details_msg,
+            parse_mode="HTML"
+        )
+
+    await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
+
+
 async def monitor_blockchain(deal_id, chat_id, bot):
     """Monitor blockchain for incoming transactions."""
     global deals, active_monitors
@@ -2049,38 +2084,9 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             deal['status'] = 'payment_received'
             save_deals()
 
-            # Update deal log - Payment Received
-            await update_deal_log(bot, deal_id, "Payment Received")
-
-            received_msg = build_usdt_received_message(
-                deal, deal_id, total_received
+            await finalize_payment_received(
+                bot, deal, deal_id, chat_id, total_received
             )
-            await bot.send_message(
-                chat_id=chat_id,
-                text=received_msg,
-                parse_mode="HTML",
-                reply_markup=get_deal_buttons(deal_id)
-            )
-
-            payment_type = deal.get('payment_details_type', 'text')
-            if payment_type == 'photo':
-                photo_id = deal.get('payment_details')
-                details_msg = build_payment_details_message(deal, deal_id)
-                sent_details = await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo_id,
-                    caption=details_msg,
-                    parse_mode="HTML"
-                )
-            else:
-                details_msg = build_payment_details_message(deal, deal_id)
-                sent_details = await bot.send_message(
-                    chat_id=chat_id,
-                    text=details_msg,
-                    parse_mode="HTML"
-                )
-
-            await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
 
             if deal_id in active_monitors:
                 del active_monitors[deal_id]
@@ -3007,10 +3013,10 @@ async def handle_callback(
         amount_str = deal.get('amount_crypto') or deal.get('amount_usdt') or deal.get('amount_usdc') or '0'
         deal_amount = float(amount_str) if amount_str else 0.0
         currency = deal.get('currency', 'USDT')
+        chat_id = query.message.chat_id
 
         deal['received_amount'] = deal_amount
         deal['admin_confirmed'] = True
-        deal['status'] = 'payment_received'
         save_deals()
 
         try:
@@ -3018,43 +3024,65 @@ async def handle_callback(
         except Exception:
             pass
 
+        confirmations = 1
         detected_msg = build_payment_detected_message(
-            deal_id, deal_amount, deal_amount, str(deal_amount), currency, "30/30"
+            deal_id,
+            deal_amount,
+            deal_amount,
+            str(deal_amount),
+            currency,
+            f"{confirmations}/{CONFIRMATION_TARGET}"
         )
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
+        sent_detected = await context.bot.send_message(
+            chat_id=chat_id,
             text=detected_msg,
             parse_mode="HTML"
         )
 
-        received_msg = build_usdt_received_message(deal, deal_id, deal_amount)
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=received_msg,
-            parse_mode="HTML",
-            reply_markup=get_deal_buttons(deal_id)
-        )
+        confirmation_step = max(1, CONFIRMATION_TARGET // 5)
+        while confirmations < CONFIRMATION_TARGET:
+            if deal_id not in deals:
+                return
 
-        payment_type = deal.get('payment_details_type', 'text')
-        if payment_type == 'photo':
-            photo_id = deal.get('payment_details')
-            details_msg = build_payment_details_message(deal, deal_id)
-            sent_details = await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=photo_id,
-                caption=details_msg,
-                parse_mode="HTML"
-            )
-        else:
-            details_msg = build_payment_details_message(deal, deal_id)
-            sent_details = await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=details_msg,
-                parse_mode="HTML"
-            )
+            await asyncio.sleep(1)
 
-        await update_current_stage_button(
-            context.bot, deal, query.message.chat_id, sent_details.message_id
+            if deal_id not in deals:
+                return
+
+            confirmations = min(
+                CONFIRMATION_TARGET, confirmations + confirmation_step
+            )
+            updated_detected_msg = build_payment_detected_message(
+                deal_id,
+                deal_amount,
+                deal_amount,
+                str(deal_amount),
+                currency,
+                f"{confirmations}/{CONFIRMATION_TARGET}"
+            )
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=sent_detected.message_id,
+                    text=updated_detected_msg,
+                    parse_mode="HTML"
+                )
+            except Exception as edit_error:
+                if "message is not modified" not in str(edit_error).lower():
+                    log_warning(
+                        f"Could not update admin payment confirmations for deal "
+                        f"{deal_id}: {edit_error}"
+                    )
+
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        deal['status'] = 'payment_received'
+        save_deals()
+
+        await finalize_payment_received(
+            context.bot, deal, deal_id, chat_id, deal_amount
         )
         return
 
