@@ -5289,20 +5289,30 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 hash=0
             ))
 
-            from datetime import timedelta
             for user in participants.users:
                 if user.id not in protected_ids:
                     try:
-                        # Kick user with a temporary ban that expires in 35 seconds
-                        # This kicks them but doesn't permanently ban them
+                        # Kick the user: ban then immediately unban so they are
+                        # removed from the group but not left in the banned list
+                        # (they can rejoin).
                         kick_rights = ChatBannedRights(
-                            until_date=datetime.now() + timedelta(seconds=35),
+                            until_date=None,
                             view_messages=True
                         )
                         await userbot_client(EditBannedRequest(
                             channel=chat_id,
                             participant=user.id,
                             banned_rights=kick_rights
+                        ))
+                        await asyncio.sleep(0.3)
+                        unban_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=False
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=chat_id,
+                            participant=user.id,
+                            banned_rights=unban_rights
                         ))
                         kicked_count += 1
                     except Exception as kick_error:
