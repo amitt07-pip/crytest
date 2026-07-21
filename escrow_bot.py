@@ -1841,7 +1841,7 @@ def build_deposit_confirmation_message(deal_id, amount, curr, confirmations):
     """Build the live deposit confirmation message."""
     msg = (
         f"<b><i>Deal</i></b> #{deal_id}\n\n"
-        f"<b>Deposit Is Being Confirmed</b>\n\n"
+        f"<b>DEPOSIT IS BEING CONFIRMED</b>\n\n"
         f"Amount: <b>{amount:.2f} {curr}</b>\n"
         f"Current Confirmations: {confirmations}\n"
     )
@@ -2124,21 +2124,6 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             if deal_id not in active_monitors or deal_id not in deals:
                 return
 
-            if sent_confirming:
-                try:
-                    await bot.delete_message(
-                        chat_id=chat_id,
-                        message_id=sent_confirming.message_id
-                    )
-                except Exception as delete_error:
-                    log_warning(
-                        f"Could not delete deposit confirmation message for deal "
-                        f"{deal_id}: {delete_error}"
-                    )
-
-            if deal_id not in active_monitors or deal_id not in deals:
-                return
-
             try:
                 detected_msg = build_payment_detected_message(
                     deal_id,
@@ -2158,6 +2143,18 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                     f"Could not send payment detected message for deal "
                     f"{deal_id}: {detected_error}"
                 )
+
+            if sent_confirming:
+                try:
+                    await bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=sent_confirming.message_id
+                    )
+                except Exception as delete_error:
+                    log_warning(
+                        f"Could not delete deposit confirmation message for deal "
+                        f"{deal_id}: {delete_error}"
+                    )
 
             if deal_id not in active_monitors or deal_id not in deals:
                 return
@@ -3166,21 +3163,6 @@ async def handle_callback(
         if deal_id not in deals:
             return
 
-        if sent_confirming:
-            try:
-                await context.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=sent_confirming.message_id
-                )
-            except Exception as delete_error:
-                log_warning(
-                    f"Could not delete admin deposit confirmation message for deal "
-                    f"{deal_id}: {delete_error}"
-                )
-
-        if deal_id not in deals:
-            return
-
         try:
             detected_msg = build_payment_detected_message(
                 deal_id,
@@ -3200,6 +3182,18 @@ async def handle_callback(
                 f"Could not send admin payment detected message for deal "
                 f"{deal_id}: {detected_error}"
             )
+
+        if sent_confirming:
+            try:
+                await context.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=sent_confirming.message_id
+                )
+            except Exception as delete_error:
+                log_warning(
+                    f"Could not delete admin deposit confirmation message for deal "
+                    f"{deal_id}: {delete_error}"
+                )
 
         if deal_id not in deals:
             return
