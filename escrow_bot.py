@@ -269,7 +269,7 @@ EXTRA_ADMIN_PHONE = "+918288914135"
 # normal user for cancel purposes (can only cancel a deal they're a party to).
 CANCEL_ADMIN_IDS = [6662820986, EXTRA_ADMIN_USER_ID]
 
-DEAL_LOG_CHANNEL_ID = -1003266978268
+DEAL_LOG_CHANNEL_ID = -1004433511813
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
