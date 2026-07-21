@@ -1837,6 +1837,23 @@ def build_payment_detected_message(
     return msg
 
 
+def build_deposit_confirmation_message(deal_id, amount, curr, confirmations):
+    """Build the live deposit confirmation message."""
+    msg = (
+        f"<b><i>Deal</i></b> #{deal_id}\n\n"
+        f"<b>Deposit Is Being Confirmed</b>\n\n"
+        f"Amount: <b>{amount:.2f} {curr}</b>\n"
+        f"Current Confirmations: {confirmations}\n"
+    )
+
+    msg += (
+        "\nNOTE: Please be advised that if you send INR before the payment "
+        "is confirmed, you are solely responsible for your loss!"
+    )
+
+    return msg
+
+
 def build_usdt_received_message(deal, deal_id, received_amount):
     """Build USDT received message."""
     currency = deal['currency']
@@ -1912,37 +1929,59 @@ async def update_current_stage_button(bot, deal, chat_id, new_msg_id):
 
 async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount):
     """Send the post-confirmation payment messages."""
-    await update_deal_log(bot, deal_id, "Payment Received")
+    try:
+        await update_deal_log(bot, deal_id, "Payment Received")
+    except Exception as log_error:
+        log_warning(f"Could not update payment received log for deal {deal_id}: {log_error}")
 
-    received_msg = build_usdt_received_message(
-        deal, deal_id, received_amount
-    )
-    await bot.send_message(
-        chat_id=chat_id,
-        text=received_msg,
-        parse_mode="HTML",
-        reply_markup=get_deal_buttons(deal_id)
-    )
+    try:
+        received_msg = build_usdt_received_message(
+            deal, deal_id, received_amount
+        )
+        await bot.send_message(
+            chat_id=chat_id,
+            text=received_msg,
+            parse_mode="HTML",
+            reply_markup=get_deal_buttons(deal_id)
+        )
+    except Exception as received_error:
+        log_warning(f"Could not send payment received message for deal {deal_id}: {received_error}")
 
     payment_type = deal.get('payment_details_type', 'text')
+    sent_details = None
     if payment_type == 'photo':
         photo_id = deal.get('payment_details')
-        details_msg = build_payment_details_message(deal, deal_id)
-        sent_details = await bot.send_photo(
-            chat_id=chat_id,
-            photo=photo_id,
-            caption=details_msg,
-            parse_mode="HTML"
-        )
+        try:
+            details_msg = build_payment_details_message(deal, deal_id)
+            sent_details = await bot.send_photo(
+                chat_id=chat_id,
+                photo=photo_id,
+                caption=details_msg,
+                parse_mode="HTML"
+            )
+        except Exception as photo_error:
+            log_warning(f"Could not send payment details photo for deal {deal_id}: {photo_error}")
+            try:
+                sent_details = await bot.send_message(
+                    chat_id=chat_id,
+                    text=build_payment_details_message(deal, deal_id),
+                    parse_mode="HTML"
+                )
+            except Exception as details_error:
+                log_warning(f"Could not send payment details for deal {deal_id}: {details_error}")
     else:
-        details_msg = build_payment_details_message(deal, deal_id)
-        sent_details = await bot.send_message(
-            chat_id=chat_id,
-            text=details_msg,
-            parse_mode="HTML"
-        )
+        try:
+            details_msg = build_payment_details_message(deal, deal_id)
+            sent_details = await bot.send_message(
+                chat_id=chat_id,
+                text=details_msg,
+                parse_mode="HTML"
+            )
+        except Exception as details_error:
+            log_warning(f"Could not send payment details for deal {deal_id}: {details_error}")
 
-    await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
+    if sent_details:
+        await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
 
 
 async def monitor_blockchain(deal_id, chat_id, bot):
@@ -2018,19 +2057,24 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                         1, latest_block - detected_tx_block + 1
                     )
 
-            detected_msg = build_payment_detected_message(
+            confirming_msg = build_deposit_confirmation_message(
                 deal_id,
                 latest_amount,
-                total_received,
-                deal_amount,
                 currency,
                 f"{initial_confirmations}/{CONFIRMATION_TARGET}"
             )
-            sent_detected = await bot.send_message(
-                chat_id=chat_id,
-                text=detected_msg,
-                parse_mode="HTML"
-            )
+            sent_confirming = None
+            try:
+                sent_confirming = await bot.send_message(
+                    chat_id=chat_id,
+                    text=confirming_msg,
+                    parse_mode="HTML"
+                )
+            except Exception as confirming_error:
+                log_warning(
+                    f"Could not send deposit confirmation message for deal "
+                    f"{deal_id}: {confirming_error}"
+                )
 
             confirmations = initial_confirmations
             confirmed = base_network == "SOL" or confirmations >= CONFIRMATION_TARGET
@@ -2050,29 +2094,29 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                 new_confirmations = max(
                     1, latest_block - detected_tx_block + 1
                 )
-                if new_confirmations != confirmations:
+                if new_confirmations != confirmations and sent_confirming:
                     confirmations = new_confirmations
-                    updated_detected_msg = build_payment_detected_message(
+                    updated_confirming_msg = build_deposit_confirmation_message(
                         deal_id,
                         latest_amount,
-                        total_received,
-                        deal_amount,
                         currency,
                         f"{confirmations}/{CONFIRMATION_TARGET}"
                     )
                     try:
                         await bot.edit_message_text(
                             chat_id=chat_id,
-                            message_id=sent_detected.message_id,
-                            text=updated_detected_msg,
+                            message_id=sent_confirming.message_id,
+                            text=updated_confirming_msg,
                             parse_mode="HTML"
                         )
                     except Exception as edit_error:
                         if "message is not modified" not in str(edit_error).lower():
                             log_warning(
-                                f"Could not update payment confirmations for deal "
+                                f"Could not update deposit confirmations for deal "
                                 f"{deal_id}: {edit_error}"
                             )
+                elif new_confirmations != confirmations:
+                    confirmations = new_confirmations
 
                 if confirmations >= CONFIRMATION_TARGET:
                     confirmed = True
@@ -2080,9 +2124,50 @@ async def monitor_blockchain(deal_id, chat_id, bot):
             if deal_id not in active_monitors or deal_id not in deals:
                 return
 
+            if sent_confirming:
+                try:
+                    await bot.delete_message(
+                        chat_id=chat_id,
+                        message_id=sent_confirming.message_id
+                    )
+                except Exception as delete_error:
+                    log_warning(
+                        f"Could not delete deposit confirmation message for deal "
+                        f"{deal_id}: {delete_error}"
+                    )
+
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
+            try:
+                detected_msg = build_payment_detected_message(
+                    deal_id,
+                    latest_amount,
+                    total_received,
+                    deal_amount,
+                    currency,
+                    f"{confirmations}/{CONFIRMATION_TARGET}"
+                )
+                await bot.send_message(
+                    chat_id=chat_id,
+                    text=detected_msg,
+                    parse_mode="HTML"
+                )
+            except Exception as detected_error:
+                log_warning(
+                    f"Could not send payment detected message for deal "
+                    f"{deal_id}: {detected_error}"
+                )
+
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
             deal = deals[deal_id]
-            deal['status'] = 'payment_received'
-            save_deals()
+            try:
+                deal['status'] = 'payment_received'
+                save_deals()
+            except Exception as status_error:
+                log_warning(f"Could not save payment status for deal {deal_id}: {status_error}")
 
             await finalize_payment_received(
                 bot, deal, deal_id, chat_id, total_received
@@ -3025,19 +3110,24 @@ async def handle_callback(
             pass
 
         confirmations = 1
-        detected_msg = build_payment_detected_message(
+        confirming_msg = build_deposit_confirmation_message(
             deal_id,
             deal_amount,
-            deal_amount,
-            str(deal_amount),
             currency,
             f"{confirmations}/{CONFIRMATION_TARGET}"
         )
-        sent_detected = await context.bot.send_message(
-            chat_id=chat_id,
-            text=detected_msg,
-            parse_mode="HTML"
-        )
+        sent_confirming = None
+        try:
+            sent_confirming = await context.bot.send_message(
+                chat_id=chat_id,
+                text=confirming_msg,
+                parse_mode="HTML"
+            )
+        except Exception as confirming_error:
+            log_warning(
+                f"Could not send admin deposit confirmation message for deal "
+                f"{deal_id}: {confirming_error}"
+            )
 
         confirmation_step = max(1, CONFIRMATION_TARGET // 5)
         while confirmations < CONFIRMATION_TARGET:
@@ -3052,7 +3142,47 @@ async def handle_callback(
             confirmations = min(
                 CONFIRMATION_TARGET, confirmations + confirmation_step
             )
-            updated_detected_msg = build_payment_detected_message(
+            updated_confirming_msg = build_deposit_confirmation_message(
+                deal_id,
+                deal_amount,
+                currency,
+                f"{confirmations}/{CONFIRMATION_TARGET}"
+            )
+            if sent_confirming:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=sent_confirming.message_id,
+                        text=updated_confirming_msg,
+                        parse_mode="HTML"
+                    )
+                except Exception as edit_error:
+                    if "message is not modified" not in str(edit_error).lower():
+                        log_warning(
+                            f"Could not update admin deposit confirmations for deal "
+                            f"{deal_id}: {edit_error}"
+                        )
+
+        if deal_id not in deals:
+            return
+
+        if sent_confirming:
+            try:
+                await context.bot.delete_message(
+                    chat_id=chat_id,
+                    message_id=sent_confirming.message_id
+                )
+            except Exception as delete_error:
+                log_warning(
+                    f"Could not delete admin deposit confirmation message for deal "
+                    f"{deal_id}: {delete_error}"
+                )
+
+        if deal_id not in deals:
+            return
+
+        try:
+            detected_msg = build_payment_detected_message(
                 deal_id,
                 deal_amount,
                 deal_amount,
@@ -3060,26 +3190,26 @@ async def handle_callback(
                 currency,
                 f"{confirmations}/{CONFIRMATION_TARGET}"
             )
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=sent_detected.message_id,
-                    text=updated_detected_msg,
-                    parse_mode="HTML"
-                )
-            except Exception as edit_error:
-                if "message is not modified" not in str(edit_error).lower():
-                    log_warning(
-                        f"Could not update admin payment confirmations for deal "
-                        f"{deal_id}: {edit_error}"
-                    )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=detected_msg,
+                parse_mode="HTML"
+            )
+        except Exception as detected_error:
+            log_warning(
+                f"Could not send admin payment detected message for deal "
+                f"{deal_id}: {detected_error}"
+            )
 
         if deal_id not in deals:
             return
 
         deal = deals[deal_id]
-        deal['status'] = 'payment_received'
-        save_deals()
+        try:
+            deal['status'] = 'payment_received'
+            save_deals()
+        except Exception as status_error:
+            log_warning(f"Could not save payment status for deal {deal_id}: {status_error}")
 
         await finalize_payment_received(
             context.bot, deal, deal_id, chat_id, deal_amount
