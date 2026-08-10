@@ -574,6 +574,7 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
     parties_lines = ""
     if show_parties and buyer and seller and buyer != 'N/A' and seller != 'N/A':
         parties_lines = (
+            f"• <b>Deal ID</b> - #{deal_id}\n"
             f"• <b>Seller</b> - {seller}\n"
             f"• <b>Buyer</b> - {buyer}\n"
         )
@@ -738,10 +739,10 @@ async def update_deal_log(bot, deal_id, status):
         
         msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user, show_parties)
         
-        # Add "CHECK ESCROW DETAILS" button if deal has form data
+        # Add "DEAL INFO" button if deal has form data
         reply_markup = None
         if show_parties and deal.get('corrected_form_text'):
-            keyboard = [[InlineKeyboardButton("CHECK ESCROW DETAILS", callback_data=f"checkescrow_{deal_id}")]]
+            keyboard = [[InlineKeyboardButton("DEAL INFO", callback_data=f"checkescrow_{deal_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
         
         await bot.edit_message_text(
@@ -2547,7 +2548,7 @@ async def handle_callback(
     user_id = user.id
     username = user.username.lower() if user.username else None
 
-    # Handle "CHECK ESCROW DETAILS" callback - show corrected form as popup
+    # Handle "DEAL INFO" callback - show corrected form as popup
     if data.startswith("checkescrow_"):
         deal_id = data.replace("checkescrow_", "")
         # Check active deals first, then fall back to persistent cache
