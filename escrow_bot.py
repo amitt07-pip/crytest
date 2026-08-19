@@ -840,13 +840,28 @@ def parse_work_chat_id(value):
     chat_id = str(value).strip()
     if chat_id.startswith("@"):
         return None
-    if chat_id.startswith("-100"):
-        if not chat_id[4:].isdigit():
-            return None
+    try:
         return int(chat_id)
-    if not chat_id.isdigit() or int(chat_id) <= 0:
+    except ValueError:
         return None
-    return get_marked_peer_id(chat_id)
+
+
+def is_work_chat(chat_id):
+    """Return True when a chat matches an entry in the working list."""
+    try:
+        parsed_chat_id = int(chat_id)
+    except (TypeError, ValueError):
+        return False
+    if parsed_chat_id in work_chats:
+        return True
+
+    marked_chat_id = get_marked_peer_id(parsed_chat_id)
+    if marked_chat_id is None:
+        return False
+    return any(
+        get_marked_peer_id(stored_chat_id) == marked_chat_id
+        for stored_chat_id in work_chats
+    )
 
 
 def is_worklist_management_update(update):
@@ -869,8 +884,8 @@ async def whitelist_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_worklist_management_update(update):
         return
     if not chat:
-        raise ApplicationHandlerStop
-    if chat.type == "private" or chat.id in work_chats:
+        return
+    if chat.type == "private" or is_work_chat(chat.id):
         return
     if chat.id == DEAL_LOG_CHANNEL_ID:
         return
@@ -6842,7 +6857,7 @@ async def add_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         return
-    if chat_id in work_chats:
+    if is_work_chat(chat_id):
         await update.message.reply_text(
             f"Chat <code>{chat_id}</code> is already in the worklist.",
             parse_mode="HTML"
@@ -6882,14 +6897,21 @@ async def remove_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML"
         )
         return
-    if chat_id not in work_chats:
+    if not is_work_chat(chat_id):
         await update.message.reply_text(
             f"Chat <code>{chat_id}</code> is not in the worklist.",
             parse_mode="HTML"
         )
         return
 
-    work_chats.remove(chat_id)
+    marked_chat_id = get_marked_peer_id(chat_id)
+    for stored_chat_id in work_chats:
+        if stored_chat_id == chat_id or (
+            marked_chat_id is not None
+            and get_marked_peer_id(stored_chat_id) == marked_chat_id
+        ):
+            work_chats.remove(stored_chat_id)
+            break
     save_work_chats()
     await update.message.reply_text(
         f"✅ Removed chat <code>{chat_id}</code> from the worklist.",
