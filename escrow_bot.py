@@ -46,7 +46,7 @@ from telegram import (  # noqa: E402
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
-    ChatMemberHandler, InlineQueryHandler
+    ChatMemberHandler, InlineQueryHandler, ApplicationHandlerStop, TypeHandler
 )
 
 from telethon import TelegramClient  # noqa: E402
@@ -79,6 +79,7 @@ USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
 FORCE_ESCROW_FILE = "force_escrow.json"
+WORK_CHATS_FILE = "work_chats.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -257,6 +258,7 @@ usdc_sol_address_index = 0
 changeaddy_sessions = {}
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
+WORKLIST_ADMIN_ID = 6643621069
 
 # Extra admin added to every newly created escrow group (resolved by ID, then
 # username, then phone). ID is the source of truth; username may change.
@@ -329,6 +331,7 @@ banned_users = {}
 user_2fa = {}
 deal_form_cache = {}
 force_escrow_users = {}
+work_chats = []
 
 
 def load_allowed_users():
@@ -464,6 +467,21 @@ def load_force_escrow():
 def save_force_escrow():
     with open(FORCE_ESCROW_FILE, "w") as f:
         json.dump(force_escrow_users, f)
+
+
+def load_work_chats():
+    global work_chats
+    try:
+        with open(WORK_CHATS_FILE, "r") as f:
+            loaded_chats = json.load(f)
+        work_chats = [int(chat_id) for chat_id in loaded_chats]
+    except (FileNotFoundError, TypeError, ValueError):
+        work_chats = []
+
+
+def save_work_chats():
+    with open(WORK_CHATS_FILE, "w") as f:
+        json.dump(work_chats, f)
 
 
 def is_force_escrow_user(username):
@@ -815,6 +833,65 @@ def get_marked_peer_id(channel_id):
         return int(f"-100{channel_str.lstrip('-')}")
     except ValueError:
         return None
+
+
+def parse_work_chat_id(value):
+    """Parse a raw or marked numeric Telegram chat id."""
+    chat_id = str(value).strip()
+    if chat_id.startswith("@"):
+        return None
+    if chat_id.startswith("-100"):
+        if not chat_id[4:].isdigit():
+            return None
+        return int(chat_id)
+    if not chat_id.isdigit() or int(chat_id) <= 0:
+        return None
+    return get_marked_peer_id(chat_id)
+
+
+def is_worklist_management_update(update):
+    """Return True for an authorized worklist-management command."""
+    user = update.effective_user
+    message = update.effective_message
+    if not user or user.id != WORKLIST_ADMIN_ID or not message:
+        return False
+
+    text = message.text or ""
+    if not text.startswith("/"):
+        return False
+    command = text.split()[0].split("@", 1)[0].lower()
+    return command in {"/addchat", "/removechat", "/worklist"}
+
+
+async def whitelist_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Drop updates from chats outside the configured working list."""
+    chat = update.effective_chat
+    if is_worklist_management_update(update):
+        return
+    if not chat:
+        raise ApplicationHandlerStop
+    if chat.type == "private" or chat.id in work_chats:
+        return
+    if chat.id == DEAL_LOG_CHANNEL_ID:
+        return
+
+    marked_chat_id = get_marked_peer_id(chat.id)
+    if marked_chat_id is not None:
+        for room_data in rooms.values():
+            if get_marked_peer_id(room_data.get("channel_id")) == marked_chat_id:
+                return
+
+        finished_statuses = {
+            "completed", "cancelled", "released", "payment_released"
+        }
+        for deal in deals.values():
+            if (
+                get_marked_peer_id(deal.get("channel_id")) == marked_chat_id
+                and deal.get("status") not in finished_statuses
+            ):
+                return
+
+    raise ApplicationHandlerStop
 
 
 def room_has_active_deal(channel_id):
@@ -6740,6 +6817,106 @@ async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="HTML")
 
 
+async def add_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a chat to the working list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /addchat <chat_id>\n"
+            "Only numeric chat IDs are supported."
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    if raw_chat_id.startswith("@"):
+        await update.message.reply_text(
+            "Usernames are not supported. Please provide a numeric chat ID."
+        )
+        return
+    chat_id = parse_work_chat_id(raw_chat_id)
+    if chat_id is None:
+        await update.message.reply_text(
+            "Invalid chat ID. Please provide a numeric ID, such as "
+            "<code>-1001234567890</code>.",
+            parse_mode="HTML"
+        )
+        return
+    if chat_id in work_chats:
+        await update.message.reply_text(
+            f"Chat <code>{chat_id}</code> is already in the worklist.",
+            parse_mode="HTML"
+        )
+        return
+
+    work_chats.append(chat_id)
+    save_work_chats()
+    await update.message.reply_text(
+        f"✅ Added chat <code>{chat_id}</code> to the worklist.",
+        parse_mode="HTML"
+    )
+
+
+async def remove_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a chat from the working list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /removechat <chat_id>\n"
+            "Only numeric chat IDs are supported."
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    if raw_chat_id.startswith("@"):
+        await update.message.reply_text(
+            "Usernames are not supported. Please provide a numeric chat ID."
+        )
+        return
+    chat_id = parse_work_chat_id(raw_chat_id)
+    if chat_id is None:
+        await update.message.reply_text(
+            "Invalid chat ID. Please provide a numeric ID, such as "
+            "<code>-1001234567890</code>.",
+            parse_mode="HTML"
+        )
+        return
+    if chat_id not in work_chats:
+        await update.message.reply_text(
+            f"Chat <code>{chat_id}</code> is not in the worklist.",
+            parse_mode="HTML"
+        )
+        return
+
+    work_chats.remove(chat_id)
+    save_work_chats()
+    await update.message.reply_text(
+        f"✅ Removed chat <code>{chat_id}</code> from the worklist.",
+        parse_mode="HTML"
+    )
+
+
+async def worklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the current working chat list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not work_chats:
+        await update.message.reply_text(
+            "<b>WORKLIST</b>\n\nNo chats added.",
+            parse_mode="HTML"
+        )
+        return
+
+    chat_lines = "\n".join(
+        f"• <code>{chat_id}</code>" for chat_id in work_chats
+    )
+    await update.message.reply_text(
+        f"<b>WORKLIST</b>\n\n{chat_lines}",
+        parse_mode="HTML"
+    )
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -6774,6 +6951,9 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .banned - List banned users\n"
         "├ .complete - Mark deal as completed\n"
         "├ .wallets - View all escrow addresses\n"
+        "├ /addchat [chat_id] - Add chat to worklist\n"
+        "├ /removechat [chat_id] - Remove chat from worklist\n"
+        "├ /worklist - View working chat list\n"
         "└ .review - Scan rooms for issues"
     )
 
@@ -7030,6 +7210,7 @@ async def main():
     load_user_2fa()
     load_deal_form_cache()
     load_force_escrow()
+    load_work_chats()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -7063,6 +7244,7 @@ async def main():
         await asyncio.sleep(0.25)
         return await _original_do_post(*args, **kwargs)
     app.bot._do_post = _delayed_do_post
+    app.add_handler(TypeHandler(Update, whitelist_gate), group=-1)
     # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
     app.add_handler(CommandHandler("forceescrow", forceescrow))
@@ -7070,6 +7252,9 @@ async def main():
     app.add_handler(CommandHandler("clean", clean))
     app.add_handler(CommandHandler("set2fa", set_2fa))
     app.add_handler(CommandHandler("kickall", kickall))
+    app.add_handler(CommandHandler("addchat", add_work_chat))
+    app.add_handler(CommandHandler("removechat", remove_work_chat))
+    app.add_handler(CommandHandler("worklist", worklist))
     # Admin commands (dot prefix)
     app.add_handler(MessageHandler(filters.Regex(r'^\.setup_rooms\b'), setup_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.rooms\b'), rooms_status))
