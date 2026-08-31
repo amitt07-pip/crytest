@@ -7209,23 +7209,22 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     def format_amount(amount):
         return "0" if amount == 0 else f"{amount:.2f}"
 
-    if str(profile_user_id) in hidden_volume_users:
-        successful_display = "[Hidden]"
-        cancelled_display = "[Hidden]"
-    else:
-        successful_display = str(successful_deals)
-        cancelled_display = str(cancelled_deals)
+    volume_display = (
+        "[Hidden]"
+        if str(profile_user_id) in hidden_volume_users
+        else None
+    )
 
     profile_text = (
         f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
         "<b>Last 30 Days Data</b>\n"
         f"Deal Success Rate: {success_rate}\n"
-        f"Successful Deals: {successful_display}\n"
-        f"Cancelled Deals: {cancelled_display}\n"
-        f"USDT Bought: {format_amount(volumes['USDT Bought'])}\n"
-        f"USDT Sold: {format_amount(volumes['USDT Sold'])}\n"
-        f"USDC Bought: {format_amount(volumes['USDC Bought'])}\n"
-        f"USDC Sold: {format_amount(volumes['USDC Sold'])}"
+        f"Successful Deals: {successful_deals}\n"
+        f"Cancelled Deals: {cancelled_deals}\n"
+        f"USDT Bought: {volume_display or format_amount(volumes['USDT Bought'])}\n"
+        f"USDT Sold: {volume_display or format_amount(volumes['USDT Sold'])}\n"
+        f"USDC Bought: {volume_display or format_amount(volumes['USDC Bought'])}\n"
+        f"USDC Sold: {volume_display or format_amount(volumes['USDC Sold'])}"
     )
     try:
         await update.message.reply_text(profile_text, parse_mode="HTML")
@@ -7281,8 +7280,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>👥 General Commands:</b>\n"
         "├ /escrow @username - Start escrow deal\n"
         "├ /profile [@username] - View 30-day deal stats\n"
-        "├ /hide_volume - Hide your deal counts\n"
-        "├ /show_volume - Show your deal counts\n"
+        "├ /hide_volume - Hide your trading volume\n"
+        "├ /show_volume - Show your trading volume\n"
         "├ /exampleform - Show deal form format\n"
         "├ /clean - Clean room after deal\n"
         "└ /set2fa [code] - Set your 2FA code\n\n"
