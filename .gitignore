@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 allowed_users.json
 force_escrow.json
+hidden_volume.json
 .env
