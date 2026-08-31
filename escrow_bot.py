@@ -85,6 +85,7 @@ WORK_CHATS_FILE = "work_chats.json"
 DEAL_HISTORY_FILE = "deal_history.json"
 HIDDEN_VOLUME_FILE = "hidden_volume.json"
 HIDDEN_DEALS_FILE = "hidden_deals.json"
+PROFILE_OVERRIDES_FILE = "profile_overrides.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -262,6 +263,7 @@ usdc_sol_address_index = 0
 # Key: user_id, Value: dict with slot, currency, network, step
 changeaddy_sessions = {}
 profile_cooldowns = {}
+clone_profile_sessions = {}
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 WORKLIST_ADMIN_ID = 6643621069
@@ -341,6 +343,7 @@ work_chats = []
 deal_history = {}
 hidden_volume_users = {}
 hidden_deal_users = {}
+profile_overrides = {}
 
 
 def load_allowed_users():
@@ -545,6 +548,27 @@ def load_hidden_deals():
 def save_hidden_deals():
     with open(HIDDEN_DEALS_FILE, "w") as f:
         json.dump(hidden_deal_users, f)
+
+
+def load_profile_overrides():
+    global profile_overrides
+    try:
+        with open(PROFILE_OVERRIDES_FILE, "r") as f:
+            loaded_overrides = json.load(f)
+        if isinstance(loaded_overrides, dict):
+            profile_overrides = {
+                str(user_id): override
+                for user_id, override in loaded_overrides.items()
+            }
+        else:
+            profile_overrides = {}
+    except (FileNotFoundError, TypeError, ValueError):
+        profile_overrides = {}
+
+
+def save_profile_overrides():
+    with open(PROFILE_OVERRIDES_FILE, "w") as f:
+        json.dump(profile_overrides, f)
 
 
 async def record_deal_result(deal, deal_id, status, chat_id):
@@ -4172,6 +4196,63 @@ async def handle_message(
         log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
         return
 
+    if (
+        user_id_msg in clone_profile_sessions
+        and clone_profile_sessions[user_id_msg].get("chat_id") == chat_id
+    ):
+        if text.startswith("/"):
+            return
+
+        parsed_stats = parse_clone_profile_stats(text)
+        if parsed_stats is None:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="Invalid stats format. Please send the filled stats message."
+            )
+            return
+
+        target_id = clone_profile_sessions[user_id_msg]["target_id"]
+        target_name = clone_profile_sessions[user_id_msg]["target_name"]
+        success_rate_value = parsed_stats.get("success_rate", 0.0)
+        successful_deals = parsed_stats.get("successful", 0)
+        cancelled_deals = parsed_stats.get("cancelled", 0)
+        volumes = {
+            "USDT Bought": parsed_stats.get("USDT Bought", 0.0),
+            "USDT Sold": parsed_stats.get("USDT Sold", 0.0),
+            "USDC Bought": parsed_stats.get("USDC Bought", 0.0),
+            "USDC Sold": parsed_stats.get("USDC Sold", 0.0)
+        }
+        profile_overrides[str(target_id)] = {
+            "success_rate": success_rate_value,
+            "successful": successful_deals,
+            "cancelled": cancelled_deals,
+            **volumes
+        }
+        save_profile_overrides()
+        clone_profile_sessions.pop(user_id_msg, None)
+
+        success_rate = (
+            "0" if success_rate_value == 0
+            else f"{success_rate_value:.2f}%"
+        )
+        stats_text = build_profile_stats_text(
+            target_name,
+            target_id,
+            success_rate,
+            successful_deals,
+            cancelled_deals,
+            volumes
+        )
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text=(
+                f"Stats updated for @{target_name} ({target_id}).\n\n"
+                f"{stats_text}"
+            ),
+            parse_mode="HTML"
+        )
+        return
+
     if message.reply_to_message:
         reply_to_msg_id = message.reply_to_message.message_id
         bot_info = await context.bot.get_me()
@@ -7107,6 +7188,86 @@ async def worklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def parse_clone_profile_stats(text):
+    """Parse profile statistics pasted into a clone-profile session."""
+    labels = {
+        "Deal Success Rate": "success_rate",
+        "Successful Deals": "successful",
+        "Cancelled Deals": "cancelled",
+        "USDT Bought": "USDT Bought",
+        "USDT Sold": "USDT Sold",
+        "USDC Bought": "USDC Bought",
+        "USDC Sold": "USDC Sold",
+    }
+    label_pattern = "|".join(
+        re.escape(label) for label in sorted(labels, key=len, reverse=True)
+    )
+    parsed = {}
+
+    for line in text.splitlines():
+        clean_line = re.sub(r"</?b>", "", line, flags=re.IGNORECASE).strip()
+        match = re.match(
+            rf"^({label_pattern})\s*:\s*(.*?)\s*$",
+            clean_line,
+            flags=re.IGNORECASE
+        )
+        if not match:
+            continue
+
+        label = labels.get(match.group(1).title())
+        if label is None:
+            label = next(
+                value for key, value in labels.items()
+                if key.lower() == match.group(1).lower()
+            )
+        raw_value = re.sub(r"[%\s,]", "", match.group(2))
+        try:
+            if label in ("successful", "cancelled"):
+                parsed[label] = int(raw_value)
+            else:
+                parsed[label] = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+
+    return parsed or None
+
+
+def build_profile_stats_text(
+    display_username,
+    profile_user_id,
+    success_rate,
+    successful_deals,
+    cancelled_deals,
+    volumes
+):
+    """Build the profile statistics response."""
+    def format_amount(amount):
+        return "0" if amount == 0 else f"{amount:.2f}"
+
+    volume_display = (
+        "[Hidden]"
+        if str(profile_user_id) in hidden_volume_users
+        else None
+    )
+    deal_count_display = (
+        "[Hidden]"
+        if str(profile_user_id) in hidden_deal_users
+        else None
+    )
+
+    return (
+        f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
+        "<b>Last 30 Days Data</b>\n"
+        f"Deal Success Rate: {success_rate}\n"
+        f"Successful Deals: {deal_count_display or successful_deals}\n"
+        f"Cancelled Deals: {deal_count_display or cancelled_deals}\n"
+        f"USDT Bought: {volume_display or format_amount(volumes['USDT Bought'])}\n"
+        f"USDT Sold: {volume_display or format_amount(volumes['USDT Sold'])}\n"
+        f"USDC Bought: {volume_display or format_amount(volumes['USDC Bought'])}\n"
+        f"USDC Sold: {volume_display or format_amount(volumes['USDC Sold'])}"
+    )
+
+
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show a user's deal statistics for the last 30 days."""
     requester = update.effective_user
@@ -7116,22 +7277,25 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         last_profile_time is not None
         and current_time - last_profile_time < 60
     ):
-        await update.message.reply_text(
-            "Please wait for 1 minute before accessing another profile."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please wait for 1 minute before accessing another profile."
         )
         return
 
     if not context.args:
-        await update.message.reply_text(
-            "Please use /profile <username>."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use /profile <username>."
         )
         return
 
     display_username = context.args[0].lstrip("@")
     target_username = display_username.lower()
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", display_username):
-        await update.message.reply_text(
-            "Invalid username. Please provide a valid username."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
         )
         return
 
@@ -7142,8 +7306,9 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as init_error:
             log_warning(f"Could not initialize userbot for profile: {init_error}")
     if userbot_client is None:
-        await update.message.reply_text(
-            "Invalid username. Please provide a valid username."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
         )
         return
 
@@ -7159,8 +7324,9 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Could not resolve profile user {display_username}: "
             f"{resolve_error}"
         )
-        await update.message.reply_text(
-            "Invalid username. Please provide a valid username."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
         )
         return
 
@@ -7228,52 +7394,177 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         success_rate = "0"
 
-    def format_amount(amount):
-        return "0" if amount == 0 else f"{amount:.2f}"
+    override = profile_overrides.get(str(profile_user_id))
+    if isinstance(override, dict):
+        try:
+            successful_deals = int(override.get("successful", 0))
+        except (TypeError, ValueError):
+            successful_deals = 0
+        try:
+            cancelled_deals = int(override.get("cancelled", 0))
+        except (TypeError, ValueError):
+            cancelled_deals = 0
+        for volume_key in volumes:
+            try:
+                volumes[volume_key] = float(override.get(volume_key, 0))
+            except (TypeError, ValueError):
+                volumes[volume_key] = 0.0
+        try:
+            override_rate = float(override.get("success_rate", 0))
+        except (TypeError, ValueError):
+            override_rate = 0.0
+        success_rate = (
+            "0" if override_rate == 0
+            else f"{override_rate:.2f}%"
+        )
 
-    volume_display = (
-        "[Hidden]"
-        if str(profile_user_id) in hidden_volume_users
-        else None
-    )
-    deal_count_display = (
-        "[Hidden]"
-        if str(profile_user_id) in hidden_deal_users
-        else None
-    )
-
-    profile_text = (
-        f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
-        "<b>Last 30 Days Data</b>\n"
-        f"Deal Success Rate: {success_rate}\n"
-        f"Successful Deals: {deal_count_display or successful_deals}\n"
-        f"Cancelled Deals: {deal_count_display or cancelled_deals}\n"
-        f"USDT Bought: {volume_display or format_amount(volumes['USDT Bought'])}\n"
-        f"USDT Sold: {volume_display or format_amount(volumes['USDT Sold'])}\n"
-        f"USDC Bought: {volume_display or format_amount(volumes['USDC Bought'])}\n"
-        f"USDC Sold: {volume_display or format_amount(volumes['USDC Sold'])}"
+    profile_text = build_profile_stats_text(
+        display_username,
+        profile_user_id,
+        success_rate,
+        successful_deals,
+        cancelled_deals,
+        volumes
     )
     try:
-        await update.message.reply_text(profile_text, parse_mode="HTML")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=profile_text,
+            parse_mode="HTML"
+        )
     except Exception as profile_error:
         log_warning(f"Could not send profile for {display_username}: {profile_error}")
         return
     profile_cooldowns[requester.id] = time.time()
 
 
+async def clone_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start an admin session to override a user's profile statistics."""
+    requester = update.effective_user
+    if requester.id not in ADMIN_USER_IDS:
+        return
+
+    global userbot_client
+    target_id = None
+    target_name = None
+
+    if not context.args:
+        target_id = int(requester.id)
+        target_name = requester.username or str(target_id)
+    else:
+        raw_target = context.args[0].strip()
+        if raw_target.isdigit():
+            target_id = int(raw_target)
+            if target_id <= 0:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            if userbot_client is None:
+                try:
+                    await init_userbot()
+                except Exception as init_error:
+                    log_warning(
+                        f"Could not initialize userbot for clone profile: "
+                        f"{init_error}"
+                    )
+            if userbot_client is not None:
+                try:
+                    target_entity = await userbot_client.get_entity(target_id)
+                    if (
+                        isinstance(target_entity, User)
+                        and getattr(target_entity, "username", None)
+                    ):
+                        target_name = target_entity.username.lstrip("@")
+                except Exception as resolve_error:
+                    log_warning(
+                        f"Could not resolve clone profile user {target_id}: "
+                        f"{resolve_error}"
+                    )
+            target_name = target_name or str(target_id)
+        else:
+            display_username = raw_target.lstrip("@")
+            if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", display_username):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            if userbot_client is None:
+                try:
+                    await init_userbot()
+                except Exception as init_error:
+                    log_warning(
+                        f"Could not initialize userbot for clone profile: "
+                        f"{init_error}"
+                    )
+            if userbot_client is None:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            try:
+                target_entity = await userbot_client.get_entity(display_username)
+                if not isinstance(target_entity, User):
+                    raise ValueError("resolved entity is not a user")
+                target_id = int(target_entity.id)
+                if target_id <= 0:
+                    raise ValueError("resolved user ID is invalid")
+                target_name = (
+                    getattr(target_entity, "username", None)
+                    or display_username
+                ).lstrip("@")
+            except Exception as resolve_error:
+                log_warning(
+                    f"Could not resolve clone profile user {display_username}: "
+                    f"{resolve_error}"
+                )
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+    clone_profile_sessions[requester.id] = {
+        "target_id": target_id,
+        "target_name": target_name,
+        "chat_id": update.effective_chat.id
+    }
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            f"Send the filled stats for @{target_name} ({target_id}):\n\n"
+            "Deal Success Rate:\n"
+            "Successful Deals:\n"
+            "Cancelled Deals:\n"
+            "USDT Bought:\n"
+            "USDT Sold:\n"
+            "USDC Bought:\n"
+            "USDC Sold:"
+        )
+    )
+
+
 async def hide_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Hide the requesting user's deal counts in profile responses."""
     user_id = str(update.effective_user.id)
     if user_id in hidden_volume_users:
-        await update.message.reply_text(
-            "You are already opted out  to hide trading volume."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted out  to hide trading volume."
         )
         return
 
     hidden_volume_users[user_id] = True
     save_hidden_volume()
-    await update.message.reply_text(
-        "You have opted out successfully to hide trading volume."
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted out successfully to hide trading volume."
     )
 
 
@@ -7281,15 +7572,17 @@ async def show_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the requesting user's deal counts in profile responses."""
     user_id = str(update.effective_user.id)
     if user_id not in hidden_volume_users:
-        await update.message.reply_text(
-            "You are already opted in to show trading volume."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted in to show trading volume."
         )
         return
 
     del hidden_volume_users[user_id]
     save_hidden_volume()
-    await update.message.reply_text(
-        "You have opted in successfully to show trading volume."
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted in successfully to show trading volume."
     )
 
 
@@ -7297,15 +7590,17 @@ async def hide_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Hide the requesting user's deal counts in profile responses."""
     user_id = str(update.effective_user.id)
     if user_id in hidden_deal_users:
-        await update.message.reply_text(
-            "You are already opted out to hide deal count."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted out to hide deal count."
         )
         return
 
     hidden_deal_users[user_id] = True
     save_hidden_deals()
-    await update.message.reply_text(
-        "You have opted out successfully to hide deal count."
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted out successfully to hide deal count."
     )
 
 
@@ -7313,15 +7608,17 @@ async def show_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the requesting user's deal counts in profile responses."""
     user_id = str(update.effective_user.id)
     if user_id not in hidden_deal_users:
-        await update.message.reply_text(
-            "You are already opted in to show deal count."
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted in to show deal count."
         )
         return
 
     del hidden_deal_users[user_id]
     save_hidden_deals()
-    await update.message.reply_text(
-        "You have opted in successfully to show deal count."
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted in successfully to show deal count."
     )
 
 
@@ -7363,6 +7660,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .gunban @user - Unban from all groups\n"
         "├ .banned - List banned users\n"
         "├ .complete - Mark deal as completed\n"
+        "├ /cloneprofile [@username|id] - Override profile stats\n"
         "├ .wallets - View all escrow addresses\n"
         "├ /addchat [chat_id] - Add chat to worklist\n"
         "├ /removechat [chat_id] - Remove chat from worklist\n"
@@ -7627,6 +7925,7 @@ async def main():
     load_deal_history()
     load_hidden_volume()
     load_hidden_deals()
+    load_profile_overrides()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -7668,6 +7967,7 @@ async def main():
     app.add_handler(CommandHandler("show_volume", show_volume))
     app.add_handler(CommandHandler("hide_deal_number", hide_deal_number))
     app.add_handler(CommandHandler("show_deal_number", show_deal_number))
+    app.add_handler(CommandHandler("cloneprofile", clone_profile))
     app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
