@@ -4028,8 +4028,20 @@ async def handle_callback(
         return
 
 
+def pending_session_expired(session):
+    """Return whether a pending input session is older than five minutes."""
+    try:
+        return time.time() - float(session.get("ts", 0)) > 300
+    except (AttributeError, TypeError, ValueError):
+        return True
+
+
 async def capture_sendmsg_message(message, context, session):
     """Copy a pending /sendmsg message and notify its administrator."""
+    if pending_session_expired(session):
+        sendmsg_sessions.pop(message.from_user.id, None)
+        return False
+
     target_chat_id = session["target_chat_id"]
     origin_chat_id = session["chat_id"]
     try:
@@ -4056,7 +4068,8 @@ async def capture_sendmsg_message(message, context, session):
                 f"Could not report /sendmsg failure to {origin_chat_id}: "
                 f"{response_error}"
             )
-        return
+        sendmsg_sessions.pop(message.from_user.id, None)
+        return True
 
     sendmsg_sessions.pop(message.from_user.id, None)
     try:
@@ -4069,6 +4082,7 @@ async def capture_sendmsg_message(message, context, session):
             f"Could not report /sendmsg success to {origin_chat_id}: "
             f"{response_error}"
         )
+    return True
 
 
 async def handle_photo(
@@ -4091,8 +4105,8 @@ async def handle_photo(
         sendmsg_session
         and sendmsg_session.get("chat_id") == chat_id
     ):
-        await capture_sendmsg_message(message, context, sendmsg_session)
-        return
+        if await capture_sendmsg_message(message, context, sendmsg_session):
+            return
 
     # Handle changeaddy QR image upload
     if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
@@ -4263,84 +4277,90 @@ async def handle_message(
         sendmsg_session
         and sendmsg_session.get("chat_id") == chat_id
     ):
-        if text.startswith("/"):
+        if pending_session_expired(sendmsg_session):
+            sendmsg_sessions.pop(user_id_msg, None)
+        elif text.startswith("/"):
             return
-        await capture_sendmsg_message(message, context, sendmsg_session)
-        return
+        elif await capture_sendmsg_message(message, context, sendmsg_session):
+            return
 
+    clone_profile_session = clone_profile_sessions.get(user_id_msg)
     if (
-        user_id_msg in clone_profile_sessions
-        and clone_profile_sessions[user_id_msg].get("chat_id") == chat_id
+        clone_profile_session
+        and clone_profile_session.get("chat_id") == chat_id
     ):
-        if text.startswith("/"):
+        if pending_session_expired(clone_profile_session):
+            clone_profile_sessions.pop(user_id_msg, None)
+        elif text.startswith("/"):
             return
 
-        parsed_stats = parse_clone_profile_stats(text)
-        if parsed_stats is None:
+        else:
+            parsed_stats = parse_clone_profile_stats(text)
+            if parsed_stats is None:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="Invalid stats format. Please send the filled stats message."
+                )
+                return
+
+            parsed_values, hidden_fields = parsed_stats
+            target_id = clone_profile_session["target_id"]
+            target_name = clone_profile_session["target_name"]
+            success_rate_value = parsed_values.get("success_rate", 0.0)
+            successful_deals = parsed_values.get("successful", 0)
+            cancelled_deals = parsed_values.get("cancelled", 0)
+            volumes = {
+                "USDT Bought": parsed_values.get("USDT Bought", 0.0),
+                "USDT Sold": parsed_values.get("USDT Sold", 0.0),
+                "USDC Bought": parsed_values.get("USDC Bought", 0.0),
+                "USDC Sold": parsed_values.get("USDC Sold", 0.0)
+            }
+            deals_hidden = bool(
+                {"successful", "cancelled"} & hidden_fields
+            )
+            volume_hidden = bool(
+                {
+                    "USDT Bought",
+                    "USDT Sold",
+                    "USDC Bought",
+                    "USDC Sold"
+                } & hidden_fields
+            )
+            profile_overrides[str(target_id)] = {
+                "success_rate": success_rate_value,
+                "successful": successful_deals,
+                "cancelled": cancelled_deals,
+                "deals_hidden": deals_hidden,
+                "volume_hidden": volume_hidden,
+                **volumes
+            }
+            save_profile_overrides()
+            clone_profile_sessions.pop(user_id_msg, None)
+
+            success_rate = (
+                "0" if success_rate_value == 0
+                else f"{success_rate_value:.2f}%"
+            )
+            stats_text = build_profile_stats_text(
+                target_name,
+                target_id,
+                success_rate,
+                successful_deals,
+                cancelled_deals,
+                volumes,
+                volume_hidden=volume_hidden,
+                deals_hidden=deals_hidden,
+                apply_privacy=False
+            )
             await context.bot.send_message(
                 chat_id=chat_id,
-                text="Invalid stats format. Please send the filled stats message."
+                text=(
+                    f"Stats updated for @{target_name} ({target_id}).\n\n"
+                    f"{stats_text}"
+                ),
+                parse_mode="HTML"
             )
             return
-
-        parsed_values, hidden_fields = parsed_stats
-        target_id = clone_profile_sessions[user_id_msg]["target_id"]
-        target_name = clone_profile_sessions[user_id_msg]["target_name"]
-        success_rate_value = parsed_values.get("success_rate", 0.0)
-        successful_deals = parsed_values.get("successful", 0)
-        cancelled_deals = parsed_values.get("cancelled", 0)
-        volumes = {
-            "USDT Bought": parsed_values.get("USDT Bought", 0.0),
-            "USDT Sold": parsed_values.get("USDT Sold", 0.0),
-            "USDC Bought": parsed_values.get("USDC Bought", 0.0),
-            "USDC Sold": parsed_values.get("USDC Sold", 0.0)
-        }
-        deals_hidden = bool(
-            {"successful", "cancelled"} & hidden_fields
-        )
-        volume_hidden = bool(
-            {
-                "USDT Bought",
-                "USDT Sold",
-                "USDC Bought",
-                "USDC Sold"
-            } & hidden_fields
-        )
-        profile_overrides[str(target_id)] = {
-            "success_rate": success_rate_value,
-            "successful": successful_deals,
-            "cancelled": cancelled_deals,
-            "deals_hidden": deals_hidden,
-            "volume_hidden": volume_hidden,
-            **volumes
-        }
-        save_profile_overrides()
-        clone_profile_sessions.pop(user_id_msg, None)
-
-        success_rate = (
-            "0" if success_rate_value == 0
-            else f"{success_rate_value:.2f}%"
-        )
-        stats_text = build_profile_stats_text(
-            target_name,
-            target_id,
-            success_rate,
-            successful_deals,
-            cancelled_deals,
-            volumes,
-            volume_hidden=volume_hidden,
-            deals_hidden=deals_hidden,
-            apply_privacy=False
-        )
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=(
-                f"Stats updated for @{target_name} ({target_id}).\n\n"
-                f"{stats_text}"
-            ),
-            parse_mode="HTML"
-        )
-        return
 
     if message.reply_to_message:
         reply_to_msg_id = message.reply_to_message.message_id
@@ -7655,7 +7675,8 @@ async def clone_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     clone_profile_sessions[requester.id] = {
         "target_id": target_id,
         "target_name": target_name,
-        "chat_id": update.effective_chat.id
+        "chat_id": update.effective_chat.id,
+        "ts": time.time()
     }
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -7727,7 +7748,8 @@ async def sendmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     sendmsg_sessions[requester.id] = {
         "target_chat_id": target_chat_id,
-        "chat_id": origin_chat_id
+        "chat_id": origin_chat_id,
+        "ts": time.time()
     }
     await context.bot.send_message(
         chat_id=origin_chat_id,
