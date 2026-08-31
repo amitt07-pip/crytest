@@ -4211,21 +4211,35 @@ async def handle_message(
             )
             return
 
+        parsed_values, hidden_fields = parsed_stats
         target_id = clone_profile_sessions[user_id_msg]["target_id"]
         target_name = clone_profile_sessions[user_id_msg]["target_name"]
-        success_rate_value = parsed_stats.get("success_rate", 0.0)
-        successful_deals = parsed_stats.get("successful", 0)
-        cancelled_deals = parsed_stats.get("cancelled", 0)
+        success_rate_value = parsed_values.get("success_rate", 0.0)
+        successful_deals = parsed_values.get("successful", 0)
+        cancelled_deals = parsed_values.get("cancelled", 0)
         volumes = {
-            "USDT Bought": parsed_stats.get("USDT Bought", 0.0),
-            "USDT Sold": parsed_stats.get("USDT Sold", 0.0),
-            "USDC Bought": parsed_stats.get("USDC Bought", 0.0),
-            "USDC Sold": parsed_stats.get("USDC Sold", 0.0)
+            "USDT Bought": parsed_values.get("USDT Bought", 0.0),
+            "USDT Sold": parsed_values.get("USDT Sold", 0.0),
+            "USDC Bought": parsed_values.get("USDC Bought", 0.0),
+            "USDC Sold": parsed_values.get("USDC Sold", 0.0)
         }
+        deals_hidden = bool(
+            {"successful", "cancelled"} & hidden_fields
+        )
+        volume_hidden = bool(
+            {
+                "USDT Bought",
+                "USDT Sold",
+                "USDC Bought",
+                "USDC Sold"
+            } & hidden_fields
+        )
         profile_overrides[str(target_id)] = {
             "success_rate": success_rate_value,
             "successful": successful_deals,
             "cancelled": cancelled_deals,
+            "deals_hidden": deals_hidden,
+            "volume_hidden": volume_hidden,
             **volumes
         }
         save_profile_overrides()
@@ -4242,6 +4256,8 @@ async def handle_message(
             successful_deals,
             cancelled_deals,
             volumes,
+            volume_hidden=volume_hidden,
+            deals_hidden=deals_hidden,
             apply_privacy=False
         )
         await context.bot.send_message(
@@ -7204,6 +7220,7 @@ def parse_clone_profile_stats(text):
         re.escape(label) for label in sorted(labels, key=len, reverse=True)
     )
     parsed = {}
+    hidden_fields = set()
 
     for line in text.splitlines():
         clean_line = re.sub(r"</?b>", "", line, flags=re.IGNORECASE).strip()
@@ -7221,7 +7238,28 @@ def parse_clone_profile_stats(text):
                 value for key, value in labels.items()
                 if key.lower() == match.group(1).lower()
             )
-        raw_value = re.sub(r"[%\s,]", "", match.group(2))
+        raw_value = match.group(2).strip()
+        if re.fullmatch(
+            r"(?:\[hidden\]|hidden)",
+            raw_value,
+            flags=re.IGNORECASE
+        ):
+            if label == "successful" or label == "cancelled":
+                hidden_fields.add(label)
+                parsed[label] = 0
+            elif label in (
+                "USDT Bought",
+                "USDT Sold",
+                "USDC Bought",
+                "USDC Sold"
+            ):
+                hidden_fields.add(label)
+                parsed[label] = 0.0
+            else:
+                parsed[label] = 0.0
+            continue
+
+        raw_value = re.sub(r"[%\s,]", "", raw_value)
         try:
             if label in ("successful", "cancelled"):
                 parsed[label] = int(raw_value)
@@ -7230,7 +7268,7 @@ def parse_clone_profile_stats(text):
         except (TypeError, ValueError):
             continue
 
-    return parsed or None
+    return (parsed, hidden_fields) if parsed else None
 
 
 def build_profile_stats_text(
@@ -7240,26 +7278,26 @@ def build_profile_stats_text(
     successful_deals,
     cancelled_deals,
     volumes,
+    volume_hidden=None,
+    deals_hidden=None,
     apply_privacy=True
 ):
     """Build the profile statistics response."""
     def format_amount(amount):
         return "0" if amount == 0 else f"{amount:.2f}"
 
-    if apply_privacy:
-        volume_display = (
-            "[Hidden]"
-            if str(profile_user_id) in hidden_volume_users
-            else None
+    if volume_hidden is None:
+        volume_hidden = (
+            apply_privacy
+            and str(profile_user_id) in hidden_volume_users
         )
-        deal_count_display = (
-            "[Hidden]"
-            if str(profile_user_id) in hidden_deal_users
-            else None
+    if deals_hidden is None:
+        deals_hidden = (
+            apply_privacy
+            and str(profile_user_id) in hidden_deal_users
         )
-    else:
-        volume_display = None
-        deal_count_display = None
+    volume_display = "[Hidden]" if volume_hidden else None
+    deal_count_display = "[Hidden]" if deals_hidden else None
 
     return (
         f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
@@ -7400,8 +7438,12 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         success_rate = "0"
 
+    volume_hidden = str(profile_user_id) in hidden_volume_users
+    deals_hidden = str(profile_user_id) in hidden_deal_users
     override = profile_overrides.get(str(profile_user_id))
     if isinstance(override, dict):
+        volume_hidden = volume_hidden or bool(override.get("volume_hidden", False))
+        deals_hidden = deals_hidden or bool(override.get("deals_hidden", False))
         try:
             successful_deals = int(override.get("successful", 0))
         except (TypeError, ValueError):
@@ -7430,7 +7472,9 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         success_rate,
         successful_deals,
         cancelled_deals,
-        volumes
+        volumes,
+        volume_hidden=volume_hidden,
+        deals_hidden=deals_hidden
     )
     try:
         await context.bot.send_message(
