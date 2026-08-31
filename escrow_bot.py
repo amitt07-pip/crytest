@@ -84,6 +84,7 @@ FORCE_ESCROW_FILE = "force_escrow.json"
 WORK_CHATS_FILE = "work_chats.json"
 DEAL_HISTORY_FILE = "deal_history.json"
 HIDDEN_VOLUME_FILE = "hidden_volume.json"
+HIDDEN_DEALS_FILE = "hidden_deals.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -339,6 +340,7 @@ force_escrow_users = {}
 work_chats = []
 deal_history = {}
 hidden_volume_users = {}
+hidden_deal_users = {}
 
 
 def load_allowed_users():
@@ -523,6 +525,26 @@ def load_hidden_volume():
 def save_hidden_volume():
     with open(HIDDEN_VOLUME_FILE, "w") as f:
         json.dump(hidden_volume_users, f)
+
+
+def load_hidden_deals():
+    global hidden_deal_users
+    try:
+        with open(HIDDEN_DEALS_FILE, "r") as f:
+            loaded_users = json.load(f)
+        if isinstance(loaded_users, dict):
+            hidden_deal_users = {
+                str(user_id): True for user_id in loaded_users
+            }
+        else:
+            hidden_deal_users = {}
+    except (FileNotFoundError, TypeError, ValueError):
+        hidden_deal_users = {}
+
+
+def save_hidden_deals():
+    with open(HIDDEN_DEALS_FILE, "w") as f:
+        json.dump(hidden_deal_users, f)
 
 
 async def record_deal_result(deal, deal_id, status, chat_id):
@@ -7214,13 +7236,18 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if str(profile_user_id) in hidden_volume_users
         else None
     )
+    deal_count_display = (
+        "[Hidden]"
+        if str(profile_user_id) in hidden_deal_users
+        else None
+    )
 
     profile_text = (
         f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
         "<b>Last 30 Days Data</b>\n"
         f"Deal Success Rate: {success_rate}\n"
-        f"Successful Deals: {successful_deals}\n"
-        f"Cancelled Deals: {cancelled_deals}\n"
+        f"Successful Deals: {deal_count_display or successful_deals}\n"
+        f"Cancelled Deals: {deal_count_display or cancelled_deals}\n"
         f"USDT Bought: {volume_display or format_amount(volumes['USDT Bought'])}\n"
         f"USDT Sold: {volume_display or format_amount(volumes['USDT Sold'])}\n"
         f"USDC Bought: {volume_display or format_amount(volumes['USDC Bought'])}\n"
@@ -7266,6 +7293,38 @@ async def show_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def hide_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hide the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id in hidden_deal_users:
+        await update.message.reply_text(
+            "You are already opted out to hide deal count."
+        )
+        return
+
+    hidden_deal_users[user_id] = True
+    save_hidden_deals()
+    await update.message.reply_text(
+        "You have opted out successfully to hide deal count."
+    )
+
+
+async def show_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id not in hidden_deal_users:
+        await update.message.reply_text(
+            "You are already opted in to show deal count."
+        )
+        return
+
+    del hidden_deal_users[user_id]
+    save_hidden_deals()
+    await update.message.reply_text(
+        "You have opted in successfully to show deal count."
+    )
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -7282,6 +7341,8 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ /profile [@username] - View 30-day deal stats\n"
         "├ /hide_volume - Hide your trading volume\n"
         "├ /show_volume - Show your trading volume\n"
+        "├ /hide_deal_number - Hide your deal count\n"
+        "├ /show_deal_number - Show your deal count\n"
         "├ /exampleform - Show deal form format\n"
         "├ /clean - Clean room after deal\n"
         "└ /set2fa [code] - Set your 2FA code\n\n"
@@ -7565,6 +7626,7 @@ async def main():
     load_work_chats()
     load_deal_history()
     load_hidden_volume()
+    load_hidden_deals()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -7604,6 +7666,8 @@ async def main():
     app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CommandHandler("hide_volume", hide_volume))
     app.add_handler(CommandHandler("show_volume", show_volume))
+    app.add_handler(CommandHandler("hide_deal_number", hide_deal_number))
+    app.add_handler(CommandHandler("show_deal_number", show_deal_number))
     app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))

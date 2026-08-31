@@ -4,4 +4,5 @@ __pycache__/
 allowed_users.json
 force_escrow.json
 hidden_volume.json
+hidden_deals.json
 .env
