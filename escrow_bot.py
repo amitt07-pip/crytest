@@ -80,6 +80,7 @@ DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
 ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
 FORCE_ESCROW_FILE = "force_escrow.json"
 WORK_CHATS_FILE = "work_chats.json"
+DEAL_HISTORY_FILE = "deal_history.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -332,6 +333,7 @@ user_2fa = {}
 deal_form_cache = {}
 force_escrow_users = {}
 work_chats = []
+deal_history = {}
 
 
 def load_allowed_users():
@@ -482,6 +484,86 @@ def load_work_chats():
 def save_work_chats():
     with open(WORK_CHATS_FILE, "w") as f:
         json.dump(work_chats, f)
+
+
+def load_deal_history():
+    global deal_history
+    try:
+        with open(DEAL_HISTORY_FILE, "r") as f:
+            deal_history = json.load(f)
+    except FileNotFoundError:
+        deal_history = {}
+
+
+def save_deal_history():
+    with open(DEAL_HISTORY_FILE, "w") as f:
+        json.dump(deal_history, f)
+
+
+def record_deal_result(deal, deal_id, status, chat_id):
+    """Persist a completed or cancelled deal for profile statistics."""
+    try:
+        if status not in ("completed", "cancelled"):
+            return
+
+        history_key = str(deal_id)
+        existing = deal_history.get(history_key)
+        if existing:
+            if (
+                existing.get("status") == "completed"
+                and status == "cancelled"
+            ) or existing.get("status") == status:
+                return
+
+        buyer = deal["buyer"]
+        seller = deal["seller"]
+        currency = deal["currency"]
+        amount = 0.0
+        try:
+            amount = float(deal.get("amount_crypto"))
+        except (TypeError, ValueError):
+            pass
+
+        group_info = group_data.get(str(chat_id), {})
+        identities = (
+            (
+                group_info.get("sender_user"),
+                group_info.get("sender_user_id")
+            ),
+            (
+                group_info.get("mentioned_user"),
+                group_info.get("mentioned_user_id")
+            )
+        )
+
+        def resolve_user_id(username):
+            username_clean = str(username or "").lstrip("@").lower()
+            for known_username, known_user_id in identities:
+                if (
+                    username_clean
+                    == str(known_username or "").lstrip("@").lower()
+                ):
+                    try:
+                        return int(known_user_id)
+                    except (TypeError, ValueError):
+                        return None
+            return None
+
+        deal_history[history_key] = {
+            "status": status,
+            "ts": time.time(),
+            "currency": currency,
+            "amount": amount,
+            "buyer": str(buyer).lstrip("@").lower(),
+            "seller": str(seller).lstrip("@").lower(),
+            "buyer_id": resolve_user_id(buyer),
+            "seller_id": resolve_user_id(seller)
+        }
+        save_deal_history()
+    except Exception as history_error:
+        log_warning(
+            f"Could not record deal result for {deal_id}: {history_error}"
+        )
 
 
 def is_force_escrow_user(username):
@@ -3138,6 +3220,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
+        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3315,10 +3398,12 @@ async def handle_callback(
         if deal_id not in deals:
             return
 
+        deal = deals[deal_id]
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
             mark_room_free(room_num)
 
+        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3371,6 +3456,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
+        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3485,6 +3571,7 @@ async def handle_callback(
 
         # Update deal log - Deal Completed (before deleting deal)
         await update_deal_log(context.bot, deal_id, "Deal Completed")
+        record_deal_result(deal, deal_id, "completed", query.message.chat_id)
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -3571,6 +3658,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
+        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -5585,12 +5673,28 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_channel_id = str(chat_id)
     
     room_num = get_room_by_channel_id(chat_id)
+    channel_id_str = (
+        str(chat_id).replace("-100", "")
+        if str(chat_id).startswith("-100") else str(chat_id)
+    )
+    deal_id = None
+    deal = None
+    for candidate_id, candidate_deal in deals.items():
+        if (
+            candidate_deal.get("chat_id") == chat_id
+            or str(candidate_deal.get("channel_id")) == channel_id_str
+        ):
+            deal_id = candidate_id
+            deal = candidate_deal
+            break
     
     if full_channel_id not in group_data:
         await update.message.reply_text("No active deal found in this group.")
         return
     
     gdata = group_data[full_channel_id]
+    if deal is not None:
+        record_deal_result(deal, deal_id, "completed", chat_id)
     escrow_msg_id = gdata.get("escrow_message_id")
     escrow_chat_id = gdata.get("escrow_chat_id")
     mentioned_user = gdata.get("mentioned_user", "")
@@ -6612,6 +6716,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if room_num:
         mark_room_free(room_num)
 
+    record_deal_result(deal, active_deal_id, "cancelled", chat_id)
     del deals[active_deal_id]
     save_deals()
 
@@ -6939,6 +7044,120 @@ async def worklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show a user's deal statistics for the last 30 days."""
+    requester = update.effective_user
+    if context.args:
+        display_username = context.args[0].lstrip("@")
+        profile_user_id = None
+    else:
+        display_username = requester.username or ""
+        profile_user_id = requester.id
+
+    if not display_username:
+        await update.message.reply_text(
+            "A username is required to view a profile."
+        )
+        return
+
+    target_username = display_username.lower()
+    cutoff = time.time() - (30 * 24 * 3600)
+    profile_records = []
+    successful_deals = 0
+    cancelled_deals = 0
+    volumes = {
+        "USDT Bought": 0.0,
+        "USDT Sold": 0.0,
+        "USDC Bought": 0.0,
+        "USDC Sold": 0.0
+    }
+
+    for record in deal_history.values():
+        if not isinstance(record, dict):
+            continue
+        try:
+            record_ts = float(record.get("ts", 0))
+        except (TypeError, ValueError):
+            continue
+        if record_ts < cutoff:
+            continue
+
+        buyer = str(record.get("buyer", "")).lstrip("@").lower()
+        seller = str(record.get("seller", "")).lstrip("@").lower()
+        if target_username != buyer and target_username != seller:
+            continue
+
+        profile_records.append((record_ts, record))
+        status = record.get("status")
+        if status == "completed":
+            successful_deals += 1
+            try:
+                amount = float(record.get("amount", 0))
+            except (TypeError, ValueError):
+                amount = 0.0
+            currency = str(record.get("currency", "")).upper()
+            if currency in ("USDT", "USDC"):
+                if target_username == buyer:
+                    volumes[f"{currency} Bought"] += amount
+                if target_username == seller:
+                    volumes[f"{currency} Sold"] += amount
+        elif status == "cancelled":
+            cancelled_deals += 1
+
+    for _, record in sorted(
+        profile_records, key=lambda item: item[0], reverse=True
+    ):
+        if target_username == str(record.get("buyer", "")).lstrip("@").lower():
+            stored_id = record.get("buyer_id")
+        else:
+            stored_id = record.get("seller_id")
+        if stored_id is not None:
+            try:
+                profile_user_id = int(stored_id)
+                break
+            except (TypeError, ValueError):
+                pass
+
+    if profile_user_id is None:
+        global userbot_client
+        if userbot_client is None:
+            try:
+                await init_userbot()
+            except Exception as init_error:
+                log_warning(f"Could not initialize userbot for profile: {init_error}")
+        if userbot_client is not None:
+            try:
+                entity = await userbot_client.get_entity(display_username)
+                profile_user_id = entity.id
+            except Exception as resolve_error:
+                log_warning(
+                    f"Could not resolve profile user {display_username}: "
+                    f"{resolve_error}"
+                )
+
+    total_deals = successful_deals + cancelled_deals
+    if total_deals:
+        success_rate = f"{successful_deals / total_deals * 100:.2f}%"
+    else:
+        success_rate = "0"
+
+    def format_amount(amount):
+        return "0" if amount == 0 else f"{amount:.2f}"
+
+    profile_text = (
+        f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
+        "<b>Last 30 Days Data</b>\n"
+        f"Deal Success Rate: {success_rate}\n"
+        f"Successful Deals: {successful_deals}\n"
+        f"Cancelled Deals: {cancelled_deals}\n"
+        f"USDT Bought: {format_amount(volumes['USDT Bought'])}\n"
+        f"USDT Sold: {format_amount(volumes['USDT Sold'])}\n"
+        f"USDC Bought: {format_amount(volumes['USDC Bought'])}\n"
+        f"USDC Sold: {format_amount(volumes['USDC Sold'])}"
+    )
+    await update.message.reply_text(profile_text, parse_mode="HTML")
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -6952,6 +7171,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "<b>👥 General Commands:</b>\n"
         "├ /escrow @username - Start escrow deal\n"
+        "├ /profile [@username] - View 30-day deal stats\n"
         "├ /exampleform - Show deal form format\n"
         "├ /clean - Clean room after deal\n"
         "└ /set2fa [code] - Set your 2FA code\n\n"
@@ -7233,6 +7453,7 @@ async def main():
     load_deal_form_cache()
     load_force_escrow()
     load_work_chats()
+    load_deal_history()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -7269,6 +7490,7 @@ async def main():
     app.add_handler(TypeHandler(Update, whitelist_gate), group=-1)
     # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
+    app.add_handler(CommandHandler("profile", profile_command))
     app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
