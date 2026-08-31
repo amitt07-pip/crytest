@@ -264,6 +264,7 @@ usdc_sol_address_index = 0
 changeaddy_sessions = {}
 profile_cooldowns = {}
 clone_profile_sessions = {}
+sendmsg_sessions = {}
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 WORKLIST_ADMIN_ID = 6643621069
@@ -4027,6 +4028,49 @@ async def handle_callback(
         return
 
 
+async def capture_sendmsg_message(message, context, session):
+    """Copy a pending /sendmsg message and notify its administrator."""
+    target_chat_id = session["target_chat_id"]
+    origin_chat_id = session["chat_id"]
+    try:
+        await context.bot.copy_message(
+            chat_id=target_chat_id,
+            from_chat_id=origin_chat_id,
+            message_id=message.message_id
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send copied message to {target_chat_id}: "
+            f"{send_error}"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=origin_chat_id,
+                text=(
+                    f"Could not send the message to {target_chat_id}. "
+                    f"{send_error}"
+                )
+            )
+        except Exception as response_error:
+            log_warning(
+                f"Could not report /sendmsg failure to {origin_chat_id}: "
+                f"{response_error}"
+            )
+        return
+
+    sendmsg_sessions.pop(message.from_user.id, None)
+    try:
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text=f"Message sent to {target_chat_id}."
+        )
+    except Exception as response_error:
+        log_warning(
+            f"Could not report /sendmsg success to {origin_chat_id}: "
+            f"{response_error}"
+        )
+
+
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
@@ -4041,6 +4085,14 @@ async def handle_photo(
     user = message.from_user
     user_id = user.id
     username = user.username.lower() if user.username else None
+
+    sendmsg_session = sendmsg_sessions.get(user_id)
+    if (
+        sendmsg_session
+        and sendmsg_session.get("chat_id") == chat_id
+    ):
+        await capture_sendmsg_message(message, context, sendmsg_session)
+        return
 
     # Handle changeaddy QR image upload
     if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
@@ -4146,12 +4198,23 @@ async def handle_message(
     global deals
 
     message = update.message
-    if not message or not message.text:
+    if not message:
         return
 
     chat_id = message.chat_id
     user = message.from_user
+    if not user:
+        return
     user_id_msg = user.id
+    sendmsg_session = sendmsg_sessions.get(user_id_msg)
+    if not message.text:
+        if (
+            sendmsg_session
+            and sendmsg_session.get("chat_id") == chat_id
+        ):
+            await capture_sendmsg_message(message, context, sendmsg_session)
+        return
+
     username = user.username.lower() if user.username else None
     text = message.text.strip()
 
@@ -4194,6 +4257,15 @@ async def handle_message(
             parse_mode="HTML"
         )
         log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
+        return
+
+    if (
+        sendmsg_session
+        and sendmsg_session.get("chat_id") == chat_id
+    ):
+        if text.startswith("/"):
+            return
+        await capture_sendmsg_message(message, context, sendmsg_session)
         return
 
     if (
@@ -7600,6 +7672,69 @@ async def clone_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def sendmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a message to another chat as the bot."""
+    requester = update.effective_user
+    if requester.id not in ADMIN_USER_IDS:
+        return
+
+    origin_chat_id = update.effective_chat.id
+    command_text = update.effective_message.text or ""
+    command_parts = command_text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text="Please use /sendmsg <chat id>."
+        )
+        return
+
+    target_and_text = command_parts[1].lstrip()
+    target_parts = target_and_text.split(maxsplit=1)
+    raw_target = target_parts[0]
+    if not re.fullmatch(r"[+-]?\d+", raw_target):
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text="Please use /sendmsg <chat id>."
+        )
+        return
+    target_chat_id = int(raw_target)
+
+    if len(target_parts) > 1:
+        text_to_send = target_parts[1]
+        try:
+            await context.bot.send_message(
+                chat_id=target_chat_id,
+                text=text_to_send
+            )
+        except Exception as send_error:
+            log_warning(
+                f"Could not send message to {target_chat_id}: {send_error}"
+            )
+            await context.bot.send_message(
+                chat_id=origin_chat_id,
+                text=(
+                    f"Could not send the message to {target_chat_id}. "
+                    f"{send_error}"
+                )
+            )
+            return
+
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text=f"Message sent to {target_chat_id}."
+        )
+        return
+
+    sendmsg_sessions[requester.id] = {
+        "target_chat_id": target_chat_id,
+        "chat_id": origin_chat_id
+    }
+    await context.bot.send_message(
+        chat_id=origin_chat_id,
+        text=f"Please send the message to {target_chat_id}."
+    )
+
+
 async def hide_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Hide the requesting user's deal counts in profile responses."""
     user_id = str(update.effective_user.id)
@@ -7711,6 +7846,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .banned - List banned users\n"
         "├ .complete - Mark deal as completed\n"
         "├ /cloneprofile [@username|id] - Override profile stats\n"
+        "├ /sendmsg [chat_id] - Send a message via the bot\n"
         "├ .wallets - View all escrow addresses\n"
         "├ /addchat [chat_id] - Add chat to worklist\n"
         "├ /removechat [chat_id] - Remove chat from worklist\n"
@@ -8018,6 +8154,7 @@ async def main():
     app.add_handler(CommandHandler("hide_deal_number", hide_deal_number))
     app.add_handler(CommandHandler("show_deal_number", show_deal_number))
     app.add_handler(CommandHandler("cloneprofile", clone_profile))
+    app.add_handler(CommandHandler("sendmsg", sendmsg))
     app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
@@ -8056,6 +8193,9 @@ async def main():
     ))
     app.add_handler(MessageHandler(
         filters.PHOTO, handle_photo
+    ))
+    app.add_handler(MessageHandler(
+        filters.ALL & ~filters.COMMAND, handle_message
     ))
 
     log_info("Bot started successfully")
