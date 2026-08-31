@@ -60,7 +60,9 @@ from telethon.tl.functions.channels import (  # noqa: E402
 )
 from telethon.tl.functions.contacts import ResolveUsernameRequest, ImportContactsRequest  # noqa: E402
 from telethon.tl.types import InputPhoneContact  # noqa: E402
-from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins  # noqa: E402
+from telethon.tl.types import (
+    ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins, User
+)  # noqa: E402
 
 
 API_ID = os.environ.get("API_ID")
@@ -257,6 +259,7 @@ usdc_sol_address_index = 0
 # State tracking for /changeaddy admin sessions
 # Key: user_id, Value: dict with slot, currency, network, step
 changeaddy_sessions = {}
+profile_cooldowns = {}
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 WORKLIST_ADMIN_ID = 6643621069
@@ -500,7 +503,7 @@ def save_deal_history():
         json.dump(deal_history, f)
 
 
-def record_deal_result(deal, deal_id, status, chat_id):
+async def record_deal_result(deal, deal_id, status, chat_id):
     """Persist a completed or cancelled deal for profile statistics."""
     try:
         if status not in ("completed", "cancelled"):
@@ -536,7 +539,7 @@ def record_deal_result(deal, deal_id, status, chat_id):
             )
         )
 
-        def resolve_user_id(username):
+        async def resolve_user_id(username):
             username_clean = str(username or "").lstrip("@").lower()
             for known_username, known_user_id in identities:
                 if (
@@ -546,7 +549,23 @@ def record_deal_result(deal, deal_id, status, chat_id):
                     try:
                         return int(known_user_id)
                     except (TypeError, ValueError):
-                        return None
+                        break
+
+            if not username_clean:
+                return None
+            try:
+                global userbot_client
+                if userbot_client is None:
+                    await init_userbot()
+                if userbot_client is not None:
+                    entity = await userbot_client.get_entity(username_clean)
+                    if isinstance(entity, User):
+                        return int(entity.id)
+            except Exception as resolve_error:
+                log_warning(
+                    f"Could not resolve deal user {username_clean}: "
+                    f"{resolve_error}"
+                )
             return None
 
         deal_history[history_key] = {
@@ -556,8 +575,8 @@ def record_deal_result(deal, deal_id, status, chat_id):
             "amount": amount,
             "buyer": str(buyer).lstrip("@").lower(),
             "seller": str(seller).lstrip("@").lower(),
-            "buyer_id": resolve_user_id(buyer),
-            "seller_id": resolve_user_id(seller)
+            "buyer_id": await resolve_user_id(buyer),
+            "seller_id": await resolve_user_id(seller)
         }
         save_deal_history()
     except Exception as history_error:
@@ -3220,7 +3239,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
-        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3403,7 +3422,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
-        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3456,7 +3475,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
-        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -3571,7 +3590,7 @@ async def handle_callback(
 
         # Update deal log - Deal Completed (before deleting deal)
         await update_deal_log(context.bot, deal_id, "Deal Completed")
-        record_deal_result(deal, deal_id, "completed", query.message.chat_id)
+        await record_deal_result(deal, deal_id, "completed", query.message.chat_id)
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -3658,7 +3677,7 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
-        record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -5694,7 +5713,7 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     gdata = group_data[full_channel_id]
     if deal is not None:
-        record_deal_result(deal, deal_id, "completed", chat_id)
+        await record_deal_result(deal, deal_id, "completed", chat_id)
     escrow_msg_id = gdata.get("escrow_message_id")
     escrow_chat_id = gdata.get("escrow_chat_id")
     mentioned_user = gdata.get("mentioned_user", "")
@@ -6716,7 +6735,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if room_num:
         mark_room_free(room_num)
 
-    record_deal_result(deal, active_deal_id, "cancelled", chat_id)
+    await record_deal_result(deal, active_deal_id, "cancelled", chat_id)
     del deals[active_deal_id]
     save_deals()
 
@@ -7047,21 +7066,61 @@ async def worklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show a user's deal statistics for the last 30 days."""
     requester = update.effective_user
-    if context.args:
-        display_username = context.args[0].lstrip("@")
-        profile_user_id = None
-    else:
-        display_username = requester.username or ""
-        profile_user_id = requester.id
-
-    if not display_username:
+    current_time = time.time()
+    last_profile_time = profile_cooldowns.get(requester.id)
+    if (
+        last_profile_time is not None
+        and current_time - last_profile_time < 60
+    ):
         await update.message.reply_text(
-            "A username is required to view a profile."
+            "Please wait for 1 minute before accessing another profile."
         )
         return
 
+    if not context.args:
+        await update.message.reply_text(
+            "Please use /profile <username>."
+        )
+        return
+
+    display_username = context.args[0].lstrip("@")
     target_username = display_username.lower()
-    cutoff = time.time() - (30 * 24 * 3600)
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", display_username):
+        await update.message.reply_text(
+            "Invalid username. Please provide a valid username."
+        )
+        return
+
+    global userbot_client
+    if userbot_client is None:
+        try:
+            await init_userbot()
+        except Exception as init_error:
+            log_warning(f"Could not initialize userbot for profile: {init_error}")
+    if userbot_client is None:
+        await update.message.reply_text(
+            "Invalid username. Please provide a valid username."
+        )
+        return
+
+    try:
+        target_entity = await userbot_client.get_entity(display_username)
+        if not isinstance(target_entity, User):
+            raise ValueError("resolved entity is not a user")
+        profile_user_id = int(target_entity.id)
+        if profile_user_id <= 0:
+            raise ValueError("resolved user ID is invalid")
+    except Exception as resolve_error:
+        log_warning(
+            f"Could not resolve profile user {display_username}: "
+            f"{resolve_error}"
+        )
+        await update.message.reply_text(
+            "Invalid username. Please provide a valid username."
+        )
+        return
+
+    cutoff = current_time - (30 * 24 * 3600)
     profile_records = []
     successful_deals = 0
     cancelled_deals = 0
@@ -7084,7 +7143,22 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         buyer = str(record.get("buyer", "")).lstrip("@").lower()
         seller = str(record.get("seller", "")).lstrip("@").lower()
-        if target_username != buyer and target_username != seller:
+        try:
+            buyer_id = int(record.get("buyer_id"))
+        except (TypeError, ValueError):
+            buyer_id = None
+        try:
+            seller_id = int(record.get("seller_id"))
+        except (TypeError, ValueError):
+            seller_id = None
+
+        buyer_matches = buyer_id == profile_user_id or (
+            buyer_id is None and target_username == buyer
+        )
+        seller_matches = seller_id == profile_user_id or (
+            seller_id is None and target_username == seller
+        )
+        if not buyer_matches and not seller_matches:
             continue
 
         profile_records.append((record_ts, record))
@@ -7097,43 +7171,12 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 amount = 0.0
             currency = str(record.get("currency", "")).upper()
             if currency in ("USDT", "USDC"):
-                if target_username == buyer:
+                if buyer_matches:
                     volumes[f"{currency} Bought"] += amount
-                if target_username == seller:
+                if seller_matches:
                     volumes[f"{currency} Sold"] += amount
         elif status == "cancelled":
             cancelled_deals += 1
-
-    for _, record in sorted(
-        profile_records, key=lambda item: item[0], reverse=True
-    ):
-        if target_username == str(record.get("buyer", "")).lstrip("@").lower():
-            stored_id = record.get("buyer_id")
-        else:
-            stored_id = record.get("seller_id")
-        if stored_id is not None:
-            try:
-                profile_user_id = int(stored_id)
-                break
-            except (TypeError, ValueError):
-                pass
-
-    if profile_user_id is None:
-        global userbot_client
-        if userbot_client is None:
-            try:
-                await init_userbot()
-            except Exception as init_error:
-                log_warning(f"Could not initialize userbot for profile: {init_error}")
-        if userbot_client is not None:
-            try:
-                entity = await userbot_client.get_entity(display_username)
-                profile_user_id = entity.id
-            except Exception as resolve_error:
-                log_warning(
-                    f"Could not resolve profile user {display_username}: "
-                    f"{resolve_error}"
-                )
 
     total_deals = successful_deals + cancelled_deals
     if total_deals:
@@ -7155,7 +7198,12 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"USDC Bought: {format_amount(volumes['USDC Bought'])}\n"
         f"USDC Sold: {format_amount(volumes['USDC Sold'])}"
     )
-    await update.message.reply_text(profile_text, parse_mode="HTML")
+    try:
+        await update.message.reply_text(profile_text, parse_mode="HTML")
+    except Exception as profile_error:
+        log_warning(f"Could not send profile for {display_username}: {profile_error}")
+        return
+    profile_cooldowns[requester.id] = time.time()
 
 
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
