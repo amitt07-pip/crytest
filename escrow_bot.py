@@ -4241,7 +4241,8 @@ async def handle_message(
             success_rate,
             successful_deals,
             cancelled_deals,
-            volumes
+            volumes,
+            apply_privacy=False
         )
         await context.bot.send_message(
             chat_id=chat_id,
@@ -7238,22 +7239,27 @@ def build_profile_stats_text(
     success_rate,
     successful_deals,
     cancelled_deals,
-    volumes
+    volumes,
+    apply_privacy=True
 ):
     """Build the profile statistics response."""
     def format_amount(amount):
         return "0" if amount == 0 else f"{amount:.2f}"
 
-    volume_display = (
-        "[Hidden]"
-        if str(profile_user_id) in hidden_volume_users
-        else None
-    )
-    deal_count_display = (
-        "[Hidden]"
-        if str(profile_user_id) in hidden_deal_users
-        else None
-    )
+    if apply_privacy:
+        volume_display = (
+            "[Hidden]"
+            if str(profile_user_id) in hidden_volume_users
+            else None
+        )
+        deal_count_display = (
+            "[Hidden]"
+            if str(profile_user_id) in hidden_deal_users
+            else None
+        )
+    else:
+        volume_display = None
+        deal_count_display = None
 
     return (
         f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
