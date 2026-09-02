@@ -1464,6 +1464,20 @@ def get_usdc_sol_deposit_info():
     return address, qr_image
 
 
+def format_deposit_amount(amount):
+    """Render a deal amount with at least one decimal place."""
+    raw = str(amount if amount not in (None, "") else "0").replace(",", "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return raw
+    if value == int(value):
+        return f"{value:.1f}"
+    if "." in raw:
+        return raw
+    return ("%f" % value).rstrip("0")
+
+
 async def resolve_deal_party(deal, role, bot):
     """Resolve a deal party's first name and Telegram user ID."""
     username = str(deal.get(role) or "")
@@ -1555,7 +1569,7 @@ async def build_deposit_message(deal, deal_id, bot):
     currency = deal['currency']
     network = deal.get('network', 'BSC')
     network_name = get_network_display_name(network)
-    amount = deal.get('amount_crypto', '0')
+    amount = format_deposit_amount(deal.get('amount_crypto', '0'))
 
     # Check if deal already has deposit address assigned (avoid re-rotation)
     if deal.get('deposit_address'):
