@@ -3249,15 +3249,21 @@ async def handle_callback(
         await update_deal_log(context.bot, deal_id, "Network Selected")
 
         network_name = get_network_display_name(network)
-        seller = deal['seller']
-        buyer = deal['buyer']
+        seller_name, seller_id = await resolve_deal_party(
+            deal, "seller", context.bot
+        )
+        seller_part = format_party_link(seller_name, seller_id, "seller")
+        buyer_name, buyer_id = await resolve_deal_party(
+            deal, "buyer", context.bot
+        )
+        buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
         currency = deal['currency']
 
         new_text = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
-            f"<b>{seller}</b> [Seller] has selected "
+            f"{seller_part} has selected "
             f"<b>{network_name}</b> as the deposit network for {currency}.\n\n"
-            f"🔹<b>Note to Buyer ({buyer}):</b> You will only be able to "
+            f"🔹<b>Note to Buyer</b> ({buyer_part})<b>:</b> You will only be able to "
             f"withdraw {currency} on the <b>{network_name}</b> network "
             f"as selected by the seller."
         )
@@ -3275,7 +3281,7 @@ async def handle_callback(
 
         buyer_msg = (
             f"<b><u>Deal</u></b> #{deal_id}\n\n"
-            f"{buyer} [Buyer] please <b>QUOTE</b> this message and reply "
+            f"{buyer_part} please <b>QUOTE</b> this message and reply "
             f"with your <b>{currency} {network_name}</b> address.\n"
             f"Please be mindful that funds <b>cannot be recovered</b> "
             f"if sent to the wrong network address."
@@ -4029,14 +4035,20 @@ async def handle_callback(
             await query.answer("Only the seller can release payment!")
             return
 
-        seller = deal['seller']
-        buyer = deal['buyer']
+        seller_name, seller_id = await resolve_deal_party(
+            deal, "seller", context.bot
+        )
+        seller_part = format_party_link(seller_name, seller_id, "seller")
+        buyer_name, buyer_id = await resolve_deal_party(
+            deal, "buyer", context.bot
+        )
+        buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
         currency = deal['currency']
 
         confirm_msg = (
             f"<b><u>Deal</u></b> #{deal_id}\n\n"
-            f"{seller} Are you really Really REALLY Sure???\n"
-            f"<b>Your {currency}</b> will be sent to {buyer} and if you have "
+            f"{seller_part} Are you really Really REALLY Sure???\n"
+            f"<b>Your {currency}</b> will be sent to {buyer_part} and if you have "
             f"not received your INR, then you yourself are responsible for "
             f"your LOSS!"
         )
@@ -4624,10 +4636,13 @@ async def handle_photo(
             deal['buyer_confirmed'] = False
             save_deals()
 
-            buyer = deal['buyer']
+            buyer_name, buyer_id = await resolve_deal_party(
+                deal, "buyer", context.bot
+            )
+            buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
             await message.reply_text(
                 "Payment Details Successfully Saved!\n\n"
-                f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                f"⚠️ {buyer_part} Do <b>NOT</b> send INR to the details "
                 f"given by the seller yet. Please wait for the Escrow Bot "
                 f"to prompt you before making any payment.",
                 parse_mode="HTML"
@@ -4831,20 +4846,25 @@ async def handle_message(
                 deal['status'] = 'pending_seller_address'
                 save_deals()
 
+                seller_name, seller_id = await resolve_deal_party(
+                    deal, "seller", context.bot
+                )
+                seller_part = format_party_link(
+                    seller_name, seller_id, "seller"
+                )
                 await message.reply_text(
                     "Release Address Successfully Saved!\n\n"
-                    f"⚠️ <b>{deal['seller']}</b> Do <b>NOT</b> send USDT "
+                    f"⚠️ {seller_part} Do <b>NOT</b> send USDT "
                     "to this address!!",
                     parse_mode="HTML"
                 )
 
                 network_name = get_network_display_name(deal['network'])
-                seller = deal['seller']
                 currency = deal.get('currency', 'USDT')
 
                 seller_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                    f"{seller} [Seller] please <b>QUOTE</b> this message "
+                    f"{seller_part} please <b>QUOTE</b> this message "
                     f"and reply with your <b>{currency} {network_name}</b> address "
                     f"for a <b>REFUND</b> in case of a dispute.\n"
                     f"Please be mindful that funds <b>cannot be recovered</b> "
@@ -4885,10 +4905,15 @@ async def handle_message(
                     parse_mode="HTML"
                 )
 
-                seller = deal['seller']
+                seller_name, seller_id = await resolve_deal_party(
+                    deal, "seller", context.bot
+                )
+                seller_part = format_party_link(
+                    seller_name, seller_id, "seller"
+                )
                 payment_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                    f"{seller} [Seller], please <b>QUOTE</b> this message "
+                    f"{seller_part}, please <b>QUOTE</b> this message "
                     f"and reply with your <b>Payment Details</b>.\n\n"
                     f"Please make sure that all details are correct to avoid "
                     f"any payment issues."
@@ -4918,10 +4943,13 @@ async def handle_message(
                 deal['buyer_confirmed'] = False
                 save_deals()
 
-                buyer = deal['buyer']
+                buyer_name, buyer_id = await resolve_deal_party(
+                    deal, "buyer", context.bot
+                )
+                buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
                 await message.reply_text(
                     "Payment Details Successfully Saved!\n\n"
-                    f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                    f"⚠️ {buyer_part} Do <b>NOT</b> send INR to the details "
                     f"given by the seller yet. Please wait for the Escrow Bot "
                     f"to prompt you before making any payment.",
                     parse_mode="HTML"
