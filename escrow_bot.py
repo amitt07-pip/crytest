@@ -6462,7 +6462,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to manually mark a deal as completed. Triggered by .complete command."""
-    global group_data
+    global group_data, deals
     
     user_id = update.effective_user.id
     
@@ -6495,7 +6495,12 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     gdata = group_data[full_channel_id]
     if deal is not None:
+        await update_deal_log(context.bot, deal_id, "Deal Completed")
         await record_deal_result(deal, deal_id, "completed", chat_id)
+        if room_num:
+            mark_room_free(room_num)
+        del deals[deal_id]
+        save_deals()
     escrow_msg_id = gdata.get("escrow_message_id")
     escrow_chat_id = gdata.get("escrow_chat_id")
     mentioned_user = gdata.get("mentioned_user", "")
