@@ -2224,23 +2224,6 @@ def build_payment_detected_message(
     return msg
 
 
-def build_deposit_confirmation_message(deal_id, amount, curr, confirmations):
-    """Build the live deposit confirmation message."""
-    msg = (
-        f"<b><i>Deal</i></b> #{deal_id}\n\n"
-        f"<b>DEPOSIT IS BEING CONFIRMED</b>\n\n"
-        f"Amount: <b>{amount:.2f} {curr}</b>\n"
-        f"Current Confirmations: {confirmations}\n"
-    )
-
-    msg += (
-        "\nNOTE: Please be advised that if you send INR before the payment "
-        "is confirmed, you are solely responsible for your loss!"
-    )
-
-    return msg
-
-
 def build_usdt_received_message(deal, deal_id, received_amount):
     """Build USDT received message."""
     currency = deal['currency']
@@ -2602,7 +2585,6 @@ async def monitor_blockchain(deal_id, chat_id, bot):
     monitoring_start_time = deal.get('monitoring_start_time')
     start_time = asyncio.get_event_loop().time()
     check_interval = 30
-    confirmation_check_interval = 5
     max_duration = 300
 
     log_info(f"Starting blockchain monitoring for deal {deal_id}: network={network}, address={deposit_address}, amount={deal_amount} {currency}")
@@ -2659,70 +2641,6 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                         1, latest_block - detected_tx_block + 1
                     )
 
-            confirming_msg = build_deposit_confirmation_message(
-                deal_id,
-                latest_amount,
-                currency,
-                f"{initial_confirmations}/{CONFIRMATION_TARGET}"
-            )
-            sent_confirming = None
-            try:
-                sent_confirming = await bot.send_message(
-                    chat_id=chat_id,
-                    text=confirming_msg,
-                    parse_mode="HTML"
-                )
-            except Exception as confirming_error:
-                log_warning(
-                    f"Could not send deposit confirmation message for deal "
-                    f"{deal_id}: {confirming_error}"
-                )
-
-            confirmations = initial_confirmations
-            confirmed = base_network == "SOL" or confirmations >= CONFIRMATION_TARGET
-            while not confirmed:
-                if deal_id not in active_monitors or deal_id not in deals:
-                    return
-
-                await asyncio.sleep(confirmation_check_interval)
-
-                if deal_id not in active_monitors or deal_id not in deals:
-                    return
-
-                latest_block = await get_evm_block_number(base_network)
-                if latest_block is None or detected_tx_block is None:
-                    continue
-
-                new_confirmations = max(
-                    1, latest_block - detected_tx_block + 1
-                )
-                if new_confirmations != confirmations and sent_confirming:
-                    confirmations = new_confirmations
-                    updated_confirming_msg = build_deposit_confirmation_message(
-                        deal_id,
-                        latest_amount,
-                        currency,
-                        f"{confirmations}/{CONFIRMATION_TARGET}"
-                    )
-                    try:
-                        await bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=sent_confirming.message_id,
-                            text=updated_confirming_msg,
-                            parse_mode="HTML"
-                        )
-                    except Exception as edit_error:
-                        if "message is not modified" not in str(edit_error).lower():
-                            log_warning(
-                                f"Could not update deposit confirmations for deal "
-                                f"{deal_id}: {edit_error}"
-                            )
-                elif new_confirmations != confirmations:
-                    confirmations = new_confirmations
-
-                if confirmations >= CONFIRMATION_TARGET:
-                    confirmed = True
-
             if deal_id not in active_monitors or deal_id not in deals:
                 return
 
@@ -2733,7 +2651,7 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                     total_received,
                     deal_amount,
                     currency,
-                    f"{confirmations}/{CONFIRMATION_TARGET}"
+                    f"{initial_confirmations}/{CONFIRMATION_TARGET}"
                 )
                 await bot.send_message(
                     chat_id=chat_id,
@@ -2745,18 +2663,6 @@ async def monitor_blockchain(deal_id, chat_id, bot):
                     f"Could not send payment detected message for deal "
                     f"{deal_id}: {detected_error}"
                 )
-
-            if sent_confirming:
-                try:
-                    await bot.delete_message(
-                        chat_id=chat_id,
-                        message_id=sent_confirming.message_id
-                    )
-                except Exception as delete_error:
-                    log_warning(
-                        f"Could not delete deposit confirmation message for deal "
-                        f"{deal_id}: {delete_error}"
-                    )
 
             if deal_id not in active_monitors or deal_id not in deals:
                 return
@@ -3901,60 +3807,6 @@ async def handle_callback(
         except Exception:
             pass
 
-        confirmations = 1
-        confirming_msg = build_deposit_confirmation_message(
-            deal_id,
-            deal_amount,
-            currency,
-            f"{confirmations}/{CONFIRMATION_TARGET}"
-        )
-        sent_confirming = None
-        try:
-            sent_confirming = await context.bot.send_message(
-                chat_id=chat_id,
-                text=confirming_msg,
-                parse_mode="HTML"
-            )
-        except Exception as confirming_error:
-            log_warning(
-                f"Could not send admin deposit confirmation message for deal "
-                f"{deal_id}: {confirming_error}"
-            )
-
-        confirmation_step = max(1, CONFIRMATION_TARGET // 5)
-        while confirmations < CONFIRMATION_TARGET:
-            if deal_id not in deals:
-                return
-
-            await asyncio.sleep(1)
-
-            if deal_id not in deals:
-                return
-
-            confirmations = min(
-                CONFIRMATION_TARGET, confirmations + confirmation_step
-            )
-            updated_confirming_msg = build_deposit_confirmation_message(
-                deal_id,
-                deal_amount,
-                currency,
-                f"{confirmations}/{CONFIRMATION_TARGET}"
-            )
-            if sent_confirming:
-                try:
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=sent_confirming.message_id,
-                        text=updated_confirming_msg,
-                        parse_mode="HTML"
-                    )
-                except Exception as edit_error:
-                    if "message is not modified" not in str(edit_error).lower():
-                        log_warning(
-                            f"Could not update admin deposit confirmations for deal "
-                            f"{deal_id}: {edit_error}"
-                        )
-
         if deal_id not in deals:
             return
 
@@ -3965,7 +3817,7 @@ async def handle_callback(
                 deal_amount,
                 str(deal_amount),
                 currency,
-                f"{confirmations}/{CONFIRMATION_TARGET}"
+                f"{CONFIRMATION_TARGET}/{CONFIRMATION_TARGET}"
             )
             await context.bot.send_message(
                 chat_id=chat_id,
@@ -3977,18 +3829,6 @@ async def handle_callback(
                 f"Could not send admin payment detected message for deal "
                 f"{deal_id}: {detected_error}"
             )
-
-        if sent_confirming:
-            try:
-                await context.bot.delete_message(
-                    chat_id=chat_id,
-                    message_id=sent_confirming.message_id
-                )
-            except Exception as delete_error:
-                log_warning(
-                    f"Could not delete admin deposit confirmation message for deal "
-                    f"{deal_id}: {delete_error}"
-                )
 
         if deal_id not in deals:
             return
