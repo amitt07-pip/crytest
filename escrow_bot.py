@@ -59,12 +59,13 @@ from telethon.tl.functions.messages import (  # noqa: E402
 )
 from telethon.tl.functions.channels import (  # noqa: E402
     ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest,
-    EditBannedRequest
+    EditBannedRequest, GetParticipantsRequest
 )
 from telethon.tl.functions.contacts import ResolveUsernameRequest, ImportContactsRequest  # noqa: E402
 from telethon.tl.types import InputPhoneContact  # noqa: E402
 from telethon.tl.types import (
-    ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins, User
+    ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins,
+    ChannelParticipantsRecent, User
 )  # noqa: E402
 
 
@@ -1131,12 +1132,62 @@ async def resolve_extra_admin(client):
     return None
 
 
-async def get_free_room_for_users(sender_user_id, mentioned_user_id):
+async def room_is_ready_for_assignment(
+    room_num, room_data, entity, allowed_ids
+):
+    """Return True if a free room is correctly named, deal-free and empty."""
+    room_number = room_data.get('room_number', room_num)
+    expected_title = f"Crypto India Escrow Room {room_number}"
+    title = getattr(entity, 'title', '') or ''
+    if title != expected_title:
+        log_warning(
+            f"Room {room_num} title is '{title}', expected "
+            f"'{expected_title}', skipping"
+        )
+        return False
+    if room_has_active_deal(room_data.get('channel_id')):
+        log_warning(f"Room {room_num} has an ongoing deal, skipping")
+        return False
+    try:
+        participants = await userbot_client(GetParticipantsRequest(
+            channel=entity,
+            filter=ChannelParticipantsRecent(),
+            offset=0,
+            limit=200,
+            hash=0
+        ))
+    except Exception as participants_error:
+        log_warning(
+            f"Could not get participants for room {room_num}: "
+            f"{participants_error}"
+        )
+        return False
+    outsiders = [u.id for u in participants.users if u.id not in allowed_ids]
+    if outsiders:
+        log_warning(
+            f"Room {room_num} still has members {outsiders}, skipping"
+        )
+        return False
+    return True
+
+
+async def get_free_room_for_users(sender_user_id, mentioned_user_id, bot):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
     if userbot_client is None:
         await init_userbot()
-    
+
+    cleanliness_check = True
+    try:
+        allowed_ids = set(ADMIN_USER_IDS)
+        allowed_ids.add((await userbot_client.get_me()).id)
+        allowed_ids.add((await bot.get_me()).id)
+    except Exception as ids_error:
+        log_warning(
+            f"Could not get room-assignment participant IDs: {ids_error}"
+        )
+        cleanliness_check = False
+
     for room_num, room_data in rooms.items():
         if room_data.get('status') == 'free':
             channel_id = room_data.get('channel_id')
@@ -1146,7 +1197,7 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id):
                     full_channel_id = get_marked_peer_id(channel_id)
                     if full_channel_id is None:
                         raise ValueError("Invalid channel_id")
-                    await userbot_client.get_entity(full_channel_id)
+                    entity = await userbot_client.get_entity(full_channel_id)
                 except Exception:
                     # Group doesn't exist, skip this room
                     log_warning(f"Room {room_num} group not accessible, skipping")
@@ -1155,6 +1206,13 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id):
                 sender_banned = await check_user_banned_in_room(sender_user_id, channel_id)
                 mentioned_banned = await check_user_banned_in_room(mentioned_user_id, channel_id)
                 if not sender_banned and not mentioned_banned:
+                    if (
+                        cleanliness_check
+                        and not await room_is_ready_for_assignment(
+                            room_num, room_data, entity, allowed_ids
+                        )
+                    ):
+                        continue
                     return room_num, room_data
     return None, None
 
@@ -4986,6 +5044,16 @@ async def handle_message(
         if form_data is None:
             return
 
+        if room_has_active_deal(chat_id):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "A deal is already ongoing in this group. Please cancel "
+                    "it before starting a new one."
+                )
+            )
+            return
+
         # Handle "me/Me/ME" in seller/buyer fields - replace with submitter's username
         submitter_username = f"@{user.username}" if user.username else None
         if submitter_username:
@@ -5608,7 +5676,9 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Find a free room where both users are not banned
-    room_num, room_data = await get_free_room_for_users(user_id, mentioned_user_id)
+    room_num, room_data = await get_free_room_for_users(
+        user_id, mentioned_user_id, context.bot
+    )
 
     if room_num is None:
         # Check if there are any free rooms at all
