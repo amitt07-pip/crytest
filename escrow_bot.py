@@ -1569,6 +1569,18 @@ async def resolve_deal_party(deal, role, bot):
     return display_name, user_id
 
 
+def format_party_link(display_name, user_id, role):
+    """Format a deal party's escaped display name and role."""
+    escaped_name = html.escape(str(display_name or "Unknown"))
+    role_label = role.capitalize()
+    if user_id is not None:
+        return (
+            f'<a href="tg://user?id={user_id}">'
+            f"{escaped_name} [{role_label}]</a>"
+        )
+    return f"{escaped_name} [{role_label}]"
+
+
 async def build_deposit_message(deal, deal_id, bot):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -1681,22 +1693,8 @@ async def build_deposit_message(deal, deal_id, bot):
 
     seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
     buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
-    seller_display = html.escape(seller_name)
-    buyer_display = html.escape(buyer_name)
-    if seller_id is not None:
-        seller_part = (
-            f'<a href="tg://user?id={seller_id}">'
-            f"{seller_display} [Seller]</a>"
-        )
-    else:
-        seller_part = f"{seller_display} [Seller]"
-    if buyer_id is not None:
-        buyer_part = (
-            f'<a href="tg://user?id={buyer_id}">'
-            f"{buyer_display} [Buyer]</a>"
-        )
-    else:
-        buyer_part = f"{buyer_display} [Buyer]"
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
 
     msg = (
         f"<b>Deal</b> #{deal_id}\n\n"
@@ -2327,12 +2325,13 @@ async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount
         received_msg = build_usdt_received_message(
             deal, deal_id, received_amount
         )
-        await bot.send_message(
+        received_sent = await bot.send_message(
             chat_id=chat_id,
             text=received_msg,
             parse_mode="HTML",
             reply_markup=get_deal_buttons(deal_id)
         )
+        deal['received_msg_id'] = received_sent.message_id
     except Exception as received_error:
         log_warning(f"Could not send payment received message for deal {deal_id}: {received_error}")
 
@@ -2371,6 +2370,220 @@ async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount
 
     if sent_details:
         await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
+
+
+async def resolve_cancel_parties(deal, bot):
+    """Resolve both parties for cancellation messages and authorization."""
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    return {
+        "seller": (seller_name, seller_id),
+        "buyer": (buyer_name, buyer_id),
+    }
+
+
+async def resolve_cancel_actor(deal, bot, user_id, username):
+    """Return the role and party data for an authorized deal participant."""
+    parties = await resolve_cancel_parties(deal, bot)
+    username_clean = (username or "").lstrip("@").lower()
+    for role in ("seller", "buyer"):
+        _, party_id = parties[role]
+        if party_id is not None:
+            if user_id == party_id:
+                return role, parties
+        elif username_clean == deal[role].lstrip("@").lower():
+            return role, parties
+    return None, parties
+
+
+def build_cancel_note(currency, seller_part):
+    """Build the shared cancellation warning."""
+    return (
+        f"<b>Note:</b> Upon confirmation, the deal will be canceled. "
+        f"Any deposited {currency} will be refunded to {seller_part} after "
+        f"deducting 0.5 {currency} (Cancellation charge). Please be aware "
+        f"that this action is irreversible."
+    )
+
+
+def build_cancel_request_message(deal_id, requester_part, note):
+    """Build the first cancellation confirmation message."""
+    return (
+        f"<b><u>Deal</u></b> [#{deal_id}]\n\n"
+        f"{requester_part} do you sure you want to <b>cancel</b> this deal?\n\n"
+        f"{note}"
+    )
+
+
+def build_cancel_proposal_message(
+    deal_id, requester_part, other_part, note
+):
+    """Build the second cancellation confirmation message."""
+    return (
+        f"<b><u>Deal</u></b> [#{deal_id}]\n\n"
+        f"{requester_part} has proposed to cancel this deal.\n\n"
+        f"{other_part} please confirm cancellation.\n\n"
+        f"{note}"
+    )
+
+
+def build_cancel_final_message(deal_id):
+    """Build the final cancellation message."""
+    return (
+        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+        f"The deal has been canceled by users.\n\n"
+        f"Please use /clean before leaving the group."
+    )
+
+
+def get_cancel_request_buttons(deal_id):
+    """Create the first cancellation confirmation buttons."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "Yes", callback_data=f"cnclyes_{deal_id}", style="danger"
+        ),
+        InlineKeyboardButton("No", callback_data=f"cnclno_{deal_id}")
+    ]])
+
+
+def get_cancel_proposal_buttons(deal_id):
+    """Create the second cancellation confirmation buttons."""
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton(
+            "Cancel Deal", callback_data=f"cncldeal_{deal_id}",
+            style="danger"
+        ),
+        InlineKeyboardButton("Back", callback_data=f"cnclback_{deal_id}")
+    ]])
+
+
+async def send_cancel_request_message(
+    bot, chat_id, deal_id, deal, requester_role, parties
+):
+    """Send the first cancellation confirmation message."""
+    seller_name, seller_id = parties["seller"]
+    requester_name, requester_id = parties[requester_role]
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    requester_part = format_party_link(
+        requester_name, requester_id, requester_role
+    )
+    note = build_cancel_note(deal.get("currency", "USDT"), seller_part)
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_request_message(
+                deal_id, requester_part, note
+            ),
+            parse_mode="HTML",
+            reply_markup=get_cancel_request_buttons(deal_id)
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send cancellation request for deal {deal_id}: "
+            f"{send_error}"
+        )
+        return None
+
+
+async def send_cancel_proposal_message(
+    bot, chat_id, deal_id, deal, requester_role, parties
+):
+    """Send the second cancellation confirmation message."""
+    seller_name, seller_id = parties["seller"]
+    requester_name, requester_id = parties[requester_role]
+    other_role = "buyer" if requester_role == "seller" else "seller"
+    other_name, other_id = parties[other_role]
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    requester_part = format_party_link(
+        requester_name, requester_id, requester_role
+    )
+    other_part = format_party_link(other_name, other_id, other_role)
+    note = build_cancel_note(deal.get("currency", "USDT"), seller_part)
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_proposal_message(
+                deal_id, requester_part, other_part, note
+            ),
+            parse_mode="HTML",
+            reply_markup=get_cancel_proposal_buttons(deal_id)
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send cancellation proposal for deal {deal_id}: "
+            f"{send_error}"
+        )
+        return None
+
+
+async def delete_cancel_message(bot, chat_id, message_id, deal_id):
+    """Delete a cancellation flow message without blocking its transition."""
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as delete_error:
+        log_warning(
+            f"Could not delete cancellation message for deal {deal_id}: "
+            f"{delete_error}"
+        )
+
+
+async def remove_deal_buttons_for_cancellation(bot, deal, chat_id, deal_id):
+    """Remove every tracked deal button before cancellation."""
+    for key in (
+        "deposit_msg_id",
+        "summary_msg_id",
+        "buyer_address_msg_id",
+        "seller_address_msg_id",
+        "payment_details_msg_id",
+        "received_msg_id",
+    ):
+        message_id = deal.get(key)
+        if not message_id:
+            continue
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=None
+            )
+        except Exception as edit_error:
+            log_warning(
+                f"Could not remove buttons from {key} for deal {deal_id}: "
+                f"{edit_error}"
+            )
+
+
+async def cancel_deal_after_confirmation(
+    bot, deal, deal_id, chat_id, cancel_message_id
+):
+    """Complete a user-confirmed cancellation."""
+    await remove_deal_buttons_for_cancellation(
+        bot, deal, chat_id, deal_id
+    )
+    await delete_cancel_message(bot, chat_id, cancel_message_id, deal_id)
+
+    if deal_id in active_monitors:
+        del active_monitors[deal_id]
+
+    room_num = get_room_by_channel_id(chat_id)
+    if room_num:
+        mark_room_free(room_num)
+
+    await record_deal_result(deal, deal_id, "cancelled", chat_id)
+    del deals[deal_id]
+    save_deals()
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_final_message(deal_id),
+            parse_mode="HTML"
+        )
+    except Exception as final_error:
+        log_warning(
+            f"Could not send final cancellation message for deal {deal_id}: "
+            f"{final_error}"
+        )
 
 
 async def monitor_blockchain(deal_id, chat_id, bot):
@@ -3391,6 +3604,163 @@ async def handle_callback(
         await query.answer("Dispute - Coming soon!")
         return
 
+    if data.startswith("cnclyes_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "request"
+            or str(pending.get("by")) != str(user_id)
+        ):
+            await query.answer()
+            return
+
+        chat_id = query.message.chat_id
+        await delete_cancel_message(
+            context.bot, chat_id, pending.get("msg_id"), deal_id
+        )
+        parties = await resolve_cancel_parties(deal, context.bot)
+        sent_proposal = await send_cancel_proposal_message(
+            context.bot,
+            chat_id,
+            deal_id,
+            deal,
+            pending.get("role"),
+            parties
+        )
+        if sent_proposal:
+            deal["cancel_request"] = {
+                "by": pending["by"],
+                "role": pending["role"],
+                "stage": "proposal",
+                "msg_id": sent_proposal.message_id,
+            }
+        else:
+            deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cnclno_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "request"
+        ):
+            await query.answer()
+            return
+
+        actor_role, _ = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        if (
+            actor_role is None
+            or requester_role not in ("seller", "buyer")
+            or actor_role == requester_role
+        ):
+            await query.answer()
+            return
+
+        await delete_cancel_message(
+            context.bot,
+            query.message.chat_id,
+            pending.get("msg_id"),
+            deal_id
+        )
+        deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cnclback_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "proposal"
+        ):
+            await query.answer()
+            return
+
+        actor_role, parties = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        other_role = "buyer" if requester_role == "seller" else "seller"
+        if (
+            actor_role != other_role
+            or requester_role not in ("seller", "buyer")
+        ):
+            await query.answer()
+            return
+
+        chat_id = query.message.chat_id
+        await delete_cancel_message(
+            context.bot, chat_id, pending.get("msg_id"), deal_id
+        )
+        sent_request = await send_cancel_request_message(
+            context.bot,
+            chat_id,
+            deal_id,
+            deal,
+            requester_role,
+            parties
+        )
+        if sent_request:
+            deal["cancel_request"] = {
+                "by": pending["by"],
+                "role": requester_role,
+                "stage": "request",
+                "msg_id": sent_request.message_id,
+            }
+        else:
+            deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cncldeal_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "proposal"
+        ):
+            await query.answer()
+            return
+
+        actor_role, _ = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        other_role = "buyer" if requester_role == "seller" else "seller"
+        if (
+            actor_role != other_role
+            or requester_role not in ("seller", "buyer")
+        ):
+            await query.answer()
+            return
+
+        await cancel_deal_after_confirmation(
+            context.bot,
+            deal,
+            deal_id,
+            query.message.chat_id,
+            pending.get("msg_id")
+        )
+        return
+
     if data.startswith("dealcancel_"):
         parts = data.split("_")
         deal_id = parts[1]
@@ -3408,6 +3778,36 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
         buyer_clean = deal['buyer'].lstrip('@').lower()
+
+        if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+            requester_role, parties = await resolve_cancel_actor(
+                deal, context.bot, user_id, username
+            )
+            if requester_role:
+                if deal.get("cancel_request"):
+                    await query.answer(
+                        "A cancellation request is already pending."
+                    )
+                    return
+                sent_request = await send_cancel_request_message(
+                    context.bot,
+                    query.message.chat_id,
+                    deal_id,
+                    deal,
+                    requester_role,
+                    parties
+                )
+                if sent_request:
+                    deal["cancel_request"] = {
+                        "by": user_id,
+                        "role": requester_role,
+                        "stage": "request",
+                        "msg_id": sent_request.message_id,
+                    }
+                    save_deals()
+                return
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
 
         if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only the buyer or seller can cancel the deal!")
@@ -3647,6 +4047,36 @@ async def handle_callback(
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
         buyer_clean = deal['buyer'].lstrip('@').lower()
+
+        if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+            requester_role, parties = await resolve_cancel_actor(
+                deal, context.bot, user_id, username
+            )
+            if requester_role:
+                if deal.get("cancel_request"):
+                    await query.answer(
+                        "A cancellation request is already pending."
+                    )
+                    return
+                sent_request = await send_cancel_request_message(
+                    context.bot,
+                    query.message.chat_id,
+                    deal_id,
+                    deal,
+                    requester_role,
+                    parties
+                )
+                if sent_request:
+                    deal["cancel_request"] = {
+                        "by": user_id,
+                        "role": requester_role,
+                        "stage": "request",
+                        "msg_id": sent_request.message_id,
+                    }
+                    save_deals()
+                return
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
 
         if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only the buyer or seller can cancel the deal!")
@@ -7067,6 +7497,41 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     deal = deals[active_deal_id]
     seller_clean = deal['seller'].lstrip('@').lower()
     buyer_clean = deal['buyer'].lstrip('@').lower()
+
+    if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+        requester_role, parties = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        if requester_role:
+            if deal.get("cancel_request"):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="A cancellation request is already pending."
+                )
+                return
+            sent_request = await send_cancel_request_message(
+                context.bot,
+                chat_id,
+                active_deal_id,
+                deal,
+                requester_role,
+                parties
+            )
+            if sent_request:
+                deal["cancel_request"] = {
+                    "by": user_id,
+                    "role": requester_role,
+                    "stage": "request",
+                    "msg_id": sent_request.message_id,
+                }
+                save_deals()
+            return
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Only the buyer or seller can cancel the deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
 
     if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
         await context.bot.send_message(
