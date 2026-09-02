@@ -1581,6 +1581,14 @@ def format_party_link(display_name, user_id, role):
     return f"{escaped_name} [{role_label}]"
 
 
+def format_party_name_link(display_name, user_id):
+    """Format a deal party's escaped display name without the role label."""
+    escaped_name = html.escape(str(display_name or "Unknown"))
+    if user_id is not None:
+        return f'<a href="tg://user?id={user_id}">{escaped_name}</a>'
+    return escaped_name
+
+
 async def build_deposit_message(deal, deal_id, bot):
     """Build the deposit message for seller."""
     currency = deal['currency']
@@ -3257,13 +3265,14 @@ async def handle_callback(
             deal, "buyer", context.bot
         )
         buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
+        buyer_name_part = format_party_name_link(buyer_name, buyer_id)
         currency = deal['currency']
 
         new_text = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
             f"{seller_part} has selected "
             f"<b>{network_name}</b> as the deposit network for {currency}.\n\n"
-            f"🔹<b>Note to Buyer</b> ({buyer_part})<b>:</b> You will only be able to "
+            f"🔹<b>Note to Buyer</b> ({buyer_name_part})<b>:</b> You will only be able to "
             f"withdraw {currency} on the <b>{network_name}</b> network "
             f"as selected by the seller."
         )
