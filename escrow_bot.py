@@ -2317,7 +2317,7 @@ async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount
         log_warning(f"Could not update payment received log for deal {deal_id}: {log_error}")
 
     try:
-        received_msg = build_usdt_received_message(
+        received_msg = await build_usdt_received_message(
             deal, deal_id, received_amount, bot
         )
         received_sent = await bot.send_message(
