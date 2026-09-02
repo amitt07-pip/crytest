@@ -1521,7 +1521,7 @@ async def resolve_deal_party(deal, role, bot):
                     if user_id <= 0:
                         user_id = None
                     else:
-                        first_name = getattr(entity, "first_name", None)
+                        first_name = entity.first_name
         except Exception as resolve_error:
             log_warning(
                 f"Could not resolve deal {role} {username_clean}: "
@@ -1534,19 +1534,19 @@ async def resolve_deal_party(deal, role, bot):
     if user_id is not None and not first_name:
         try:
             member = await bot.get_chat_member(deal["chat_id"], user_id)
-            first_name = getattr(member.user, "first_name", None)
+            first_name = member.user.first_name
         except Exception as member_error:
             log_warning(
                 f"Could not resolve deal {role} name for {user_id}: "
                 f"{member_error}"
             )
 
-    if not first_name and entity is not None:
-        first_name = getattr(entity, "first_name", None)
+    if not first_name and isinstance(entity, User):
+        first_name = entity.first_name
     if first_name and not deal.get(first_name_key):
         deal[first_name_key] = first_name
 
-    display_name = first_name or username.lstrip("@") or str(user_id)
+    display_name = first_name or username.lstrip("@") or "Unknown"
     return display_name, user_id
 
 
