@@ -2318,6 +2318,56 @@ async def update_current_stage_button(bot, deal, chat_id, new_msg_id):
         pass
 
 
+async def send_payment_details(bot, deal, deal_id, chat_id):
+    """Send the payment details message, retrying without custom emoji."""
+    payment_type = deal.get('payment_details_type', 'text')
+    send_as_photo_options = [True, False] if payment_type == 'photo' else [False]
+
+    for send_as_photo in send_as_photo_options:
+        for custom_emoji in (True, False):
+            try:
+                details_msg = build_payment_details_message(
+                    deal, deal_id, custom_emoji=custom_emoji
+                )
+                if send_as_photo:
+                    sent_details = await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=deal.get('payment_details'),
+                        caption=details_msg,
+                        parse_mode="HTML"
+                    )
+                else:
+                    sent_details = await bot.send_message(
+                        chat_id=chat_id,
+                        text=details_msg,
+                        parse_mode="HTML"
+                    )
+                return sent_details
+            except Exception as send_error:
+                if custom_emoji:
+                    message_kind = (
+                        "payment details photo"
+                        if send_as_photo
+                        else "payment details"
+                    )
+                    log_warning(
+                        f"Could not send {message_kind} with custom emoji "
+                        f"for deal {deal_id}: {send_error}"
+                    )
+                elif send_as_photo:
+                    log_warning(
+                        f"Could not send payment details photo for deal "
+                        f"{deal_id}: {send_error}"
+                    )
+                else:
+                    log_warning(
+                        f"Could not send payment details for deal "
+                        f"{deal_id}: {send_error}"
+                    )
+
+    return None
+
+
 async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount):
     """Send the post-confirmation payment messages."""
     try:
@@ -2339,85 +2389,7 @@ async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount
     except Exception as received_error:
         log_warning(f"Could not send payment received message for deal {deal_id}: {received_error}")
 
-    payment_type = deal.get('payment_details_type', 'text')
-    sent_details = None
-    if payment_type == 'photo':
-        photo_id = deal.get('payment_details')
-        try:
-            details_msg = build_payment_details_message(
-                deal, deal_id, custom_emoji=True
-            )
-            sent_details = await bot.send_photo(
-                chat_id=chat_id,
-                photo=photo_id,
-                caption=details_msg,
-                parse_mode="HTML"
-            )
-        except Exception:
-            try:
-                details_msg = build_payment_details_message(
-                    deal, deal_id, custom_emoji=False
-                )
-                sent_details = await bot.send_photo(
-                    chat_id=chat_id,
-                    photo=photo_id,
-                    caption=details_msg,
-                    parse_mode="HTML"
-                )
-            except Exception as plain_photo_error:
-                log_warning(
-                    f"Could not send payment details photo for deal "
-                    f"{deal_id}: {plain_photo_error}"
-                )
-                try:
-                    details_msg = build_payment_details_message(
-                        deal, deal_id, custom_emoji=True
-                    )
-                    sent_details = await bot.send_message(
-                        chat_id=chat_id,
-                        text=details_msg,
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    try:
-                        details_msg = build_payment_details_message(
-                            deal, deal_id, custom_emoji=False
-                        )
-                        sent_details = await bot.send_message(
-                            chat_id=chat_id,
-                            text=details_msg,
-                            parse_mode="HTML"
-                        )
-                    except Exception as plain_details_error:
-                        log_warning(
-                            f"Could not send payment details for deal "
-                            f"{deal_id}: {plain_details_error}"
-                        )
-    else:
-        try:
-            details_msg = build_payment_details_message(
-                deal, deal_id, custom_emoji=True
-            )
-            sent_details = await bot.send_message(
-                chat_id=chat_id,
-                text=details_msg,
-                parse_mode="HTML"
-            )
-        except Exception:
-            try:
-                details_msg = build_payment_details_message(
-                    deal, deal_id, custom_emoji=False
-                )
-                sent_details = await bot.send_message(
-                    chat_id=chat_id,
-                    text=details_msg,
-                    parse_mode="HTML"
-                )
-            except Exception as plain_details_error:
-                log_warning(
-                    f"Could not send payment details for deal "
-                    f"{deal_id}: {plain_details_error}"
-                )
+    sent_details = await send_payment_details(bot, deal, deal_id, chat_id)
 
     if sent_details:
         await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
