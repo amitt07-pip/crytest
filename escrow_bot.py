@@ -1422,7 +1422,8 @@ def get_confirm_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "Confirm[Seller]", callback_data=f"confirm_{deal_id}_seller"
+                "Confirm[Seller]", callback_data=f"confirm_{deal_id}_seller",
+                style="primary"
             ),
             InlineKeyboardButton(
                 "Confirm[Buyer]", callback_data=f"confirm_{deal_id}_buyer"
@@ -2242,17 +2243,20 @@ def get_deal_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "Release Payment", callback_data=f"release_{deal_id}"
+                "Release Payment", callback_data=f"release_{deal_id}",
+                style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                "Partial Release Payment", callback_data=f"partial_{deal_id}"
+                "Partial Release Payment", callback_data=f"partial_{deal_id}",
+                style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                "Dispute", callback_data=f"dispute_{deal_id}"
+                "Dispute", callback_data=f"dispute_{deal_id}",
+                style="primary"
             ),
             InlineKeyboardButton(
                 "CANCEL", callback_data=f"dealcancel_{deal_id}",
@@ -4133,7 +4137,8 @@ async def handle_callback(
             )],
             [InlineKeyboardButton(
                 "Dispute",
-                callback_data=f"dispute_{deal_id}"
+                callback_data=f"dispute_{deal_id}",
+                style="primary"
             )]
         ]
 
