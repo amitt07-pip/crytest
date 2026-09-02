@@ -3,6 +3,7 @@ import random
 import asyncio
 import json
 import time
+import math
 import html
 import aiohttp
 import nest_asyncio
@@ -1466,10 +1467,14 @@ def get_usdc_sol_deposit_info():
 
 def format_deposit_amount(amount):
     """Render a deal amount with at least one decimal place."""
-    raw = str(amount if amount not in (None, "") else "0").replace(",", "").strip()
+    raw = str(
+        amount if amount not in (None, "") else "0"
+    ).replace(",", "").strip()
     try:
         value = float(raw)
     except ValueError:
+        return raw
+    if not math.isfinite(value):
         return raw
     if value == int(value):
         return f"{value:.1f}"
