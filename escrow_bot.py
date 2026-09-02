@@ -3,6 +3,7 @@ import random
 import asyncio
 import json
 import time
+import html
 import aiohttp
 import nest_asyncio
 import logging
@@ -41,6 +42,7 @@ def log_warning(message):
 
 from telegram import (  # noqa: E402
     Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup,
+    MessageEntity,
     InlineQueryResultArticle, InputTextMessageContent
 )
 from telegram.ext import (  # noqa: E402
@@ -1382,7 +1384,8 @@ def get_deposit_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "I HAVE PAID", callback_data=f"ihavepaid_{deal_id}"
+                "I HAVE PAID", callback_data=f"ihavepaid_{deal_id}",
+                style="primary"
             )
         ],
         [
@@ -1461,13 +1464,98 @@ def get_usdc_sol_deposit_info():
     return address, qr_image
 
 
-def build_deposit_message(deal, deal_id):
+async def resolve_deal_party(deal, role, bot):
+    """Resolve a deal party's first name and Telegram user ID."""
+    username = str(deal.get(role) or "")
+    username_clean = username.lstrip("@").lower()
+    user_id_key = f"{role}_user_id"
+    first_name_key = f"{role}_first_name"
+    user_id = deal.get(user_id_key)
+    first_name = deal.get(first_name_key)
+    entity = None
+
+    try:
+        user_id = int(user_id) if user_id is not None else None
+        if user_id is not None and user_id <= 0:
+            user_id = None
+    except (TypeError, ValueError):
+        user_id = None
+
+    if user_id is None:
+        group_info = group_data.get(str(deal.get("chat_id")), {})
+        if not isinstance(group_info, dict):
+            group_info = {}
+        identities = (
+            (
+                group_info.get("sender_user"),
+                group_info.get("sender_user_id")
+            ),
+            (
+                group_info.get("mentioned_user"),
+                group_info.get("mentioned_user_id")
+            )
+        )
+        for known_username, known_user_id in identities:
+            if (
+                username_clean
+                == str(known_username or "").lstrip("@").lower()
+            ):
+                try:
+                    user_id = int(known_user_id)
+                    if user_id <= 0:
+                        user_id = None
+                except (TypeError, ValueError):
+                    user_id = None
+                if user_id is not None:
+                    break
+
+    if user_id is None and username_clean:
+        try:
+            global userbot_client
+            if userbot_client is None:
+                await init_userbot()
+            if userbot_client is not None:
+                entity = await userbot_client.get_entity(username_clean)
+                if isinstance(entity, User):
+                    user_id = int(entity.id)
+                    if user_id <= 0:
+                        user_id = None
+                    else:
+                        first_name = getattr(entity, "first_name", None)
+        except Exception as resolve_error:
+            log_warning(
+                f"Could not resolve deal {role} {username_clean}: "
+                f"{resolve_error}"
+            )
+
+    if user_id is not None and not deal.get(user_id_key):
+        deal[user_id_key] = user_id
+
+    if user_id is not None and not first_name:
+        try:
+            member = await bot.get_chat_member(deal["chat_id"], user_id)
+            first_name = getattr(member.user, "first_name", None)
+        except Exception as member_error:
+            log_warning(
+                f"Could not resolve deal {role} name for {user_id}: "
+                f"{member_error}"
+            )
+
+    if not first_name and entity is not None:
+        first_name = getattr(entity, "first_name", None)
+    if first_name and not deal.get(first_name_key):
+        deal[first_name_key] = first_name
+
+    display_name = first_name or username.lstrip("@") or str(user_id)
+    return display_name, user_id
+
+
+async def build_deposit_message(deal, deal_id, bot):
     """Build the deposit message for seller."""
     currency = deal['currency']
     network = deal.get('network', 'BSC')
     network_name = get_network_display_name(network)
     amount = deal.get('amount_crypto', '0')
-    seller = deal['seller']
 
     # Check if deal already has deposit address assigned (avoid re-rotation)
     if deal.get('deposit_address'):
@@ -1572,19 +1660,38 @@ def build_deposit_message(deal, deal_id):
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
 
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    seller_display = html.escape(seller_name)
+    buyer_display = html.escape(buyer_name)
+    if seller_id is not None:
+        seller_part = (
+            f'<a href="tg://user?id={seller_id}">'
+            f"{seller_display} [Seller]</a>"
+        )
+    else:
+        seller_part = f"{seller_display} [Seller]"
+    if buyer_id is not None:
+        buyer_part = (
+            f'<a href="tg://user?id={buyer_id}">'
+            f"{buyer_display} [Buyer]</a>"
+        )
+    else:
+        buyer_part = f"{buyer_display} [Buyer]"
+
     msg = (
-        f"Deal [#{deal_id}]\n"
-        f"NOTE: {seller} [Seller] <b>DEPOSIT EXACT</b> "
-        f"<b><u>{amount}</u></b> <b>{currency}</b>. "
-        f"DO NOT INCLUDE NETWORK FEE, make sure the amount received is "
-        f"exact!\n"
-        f"<b>Example</b>: If your withdrawal fee is 0.2 {currency} then send "
-        f"<b><u>{float(str(amount).replace(',', '')) + 0.2:.1f}</u></b>{currency} so the received "
-        f"amount is <b><u>{amount}</u></b> {currency}\n\n"
-        f"Deposit Address: <code>{deposit_address}</code>\n"
-        f"Chain: <code>{network_name}</code>\n\n"
-        f"Please click 'I Have Paid' <b>ONLY</b> when you have made the "
-        f"Payment."
+        f"<b>Deal</b> #{deal_id}\n\n"
+        f"<u><b>Instruction for</b> {seller_part}</u>\n\n"
+        f"Please deposit at the following credentials...\n\n"
+        f"<b>Address:</b> <code>{deposit_address}</code>\n"
+        f"<b>Chain:</b> {network_name}\n"
+        f"<b>Token:</b> {currency}\n"
+        f"<b>Amount:</b> <code>{amount}</code>\n\n"
+        f"Please click <b>I Have Paid</b> only after {currency} is sent.\n\n"
+        f"<u><b>Instruction for</b> {buyer_part}</u>\n\n"
+        f"Do <b>NOT</b> pay INR to Seller before {currency} deposit to the "
+        f"Bot address. Bot will prompt you to do so after {currency} deposit "
+        f"is done."
     )
 
     return msg
@@ -3074,7 +3181,9 @@ async def handle_callback(
             except Exception as pin_error:
                 log_warning(f"Could not pin message: {pin_error}")
 
-            deposit_text = build_deposit_message(deal, deal_id)
+            deposit_text = await build_deposit_message(
+                deal, deal_id, context.bot
+            )
             save_deals()  # Save deposit_address immediately to prevent rotation issues
             network = deal.get('network', 'BSC')
 
@@ -3195,7 +3304,10 @@ async def handle_callback(
             await query.answer("Only the seller can click this button!")
             return
 
-        deposit_text = build_deposit_message(deal, deal_id)
+        deposit_text = await build_deposit_message(
+            deal, deal_id, context.bot
+        )
+        save_deals()
         try:
             if query.message.photo:
                 await query.edit_message_caption(
@@ -7722,10 +7834,26 @@ async def sendmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(target_parts) > 1:
         text_to_send = target_parts[1]
+        prefix = command_text[:len(command_text) - len(text_to_send)]
+        shift = len(prefix.encode("utf-16-le")) // 2
+        adjusted_entities = []
+        for entity in update.effective_message.entities or []:
+            if entity.offset < shift:
+                continue
+            adjusted_entities.append(
+                MessageEntity.de_json(
+                    {
+                        **entity.to_dict(),
+                        "offset": entity.offset - shift
+                    },
+                    context.bot
+                )
+            )
         try:
             await context.bot.send_message(
                 chat_id=target_chat_id,
-                text=text_to_send
+                text=text_to_send,
+                entities=adjusted_entities or None
             )
         except Exception as send_error:
             log_warning(
