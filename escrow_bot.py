@@ -2224,15 +2224,23 @@ def build_payment_detected_message(
     return msg
 
 
-def build_usdt_received_message(deal, deal_id, received_amount):
+async def build_usdt_received_message(deal, deal_id, received_amount, bot):
     """Build USDT received message."""
     currency = deal['currency']
     deal_amount = float(deal.get('amount_crypto', '0'))
     escrow_fee = calculate_escrow_fee(str(deal_amount))
     to_release = received_amount - escrow_fee
     inr_amount = deal.get('amount_inr', '0')
-    buyer = deal['buyer']
-    seller = deal['seller']
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    payment_type = deal.get('payment_details_type', 'text')
+    payment_details = (
+        deal.get('payment_details', '')
+        if payment_type == 'text'
+        else '[See image above]'
+    )
 
     msg = (
         f"<b><u>Deal</u></b> #{deal_id}\n\n"
@@ -2242,9 +2250,13 @@ def build_usdt_received_message(deal, deal_id, received_amount):
         f"To Be Released: <b><u>{to_release:.2f} {currency}</u></b>\n"
         f"Amount to be Sent: <b><u>{inr_amount} INR</u></b>\n"
         f"Escrow Fee: <b><u>{escrow_fee:.2f} {currency}</u></b>\n\n"
-        f"{buyer} & {seller} proceed with your deal.\n\n"
-        f"{seller} release payment <b><u>ONLY</u></b> after Deal Completion.\n"
-        f"Please note that this process is irreversible."
+        f"<u><b>Instruction for</b> {buyer_part}</u>\n\n"
+        f"Please pay through...\n\n"
+        f"{payment_details}\n\n"
+        f"<u><b>Instruction for</b> {seller_part}</u>\n\n"
+        f"Please note that {currency} release is an irreversible process. "
+        f"Do <b>NOT</b> release {currency} to the Buyer before confirming "
+        f"payment at your end."
     )
 
     return msg
@@ -2306,7 +2318,7 @@ async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount
 
     try:
         received_msg = build_usdt_received_message(
-            deal, deal_id, received_amount
+            deal, deal_id, received_amount, bot
         )
         received_sent = await bot.send_message(
             chat_id=chat_id,
