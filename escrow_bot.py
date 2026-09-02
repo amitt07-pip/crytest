@@ -2461,23 +2461,23 @@ def build_cancel_final_message(deal_id):
 
 def get_cancel_request_buttons(deal_id):
     """Create the first cancellation confirmation buttons."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
             "Yes", callback_data=f"cnclyes_{deal_id}", style="danger"
-        ),
-        InlineKeyboardButton("No", callback_data=f"cnclno_{deal_id}")
-    ]])
+        )],
+        [InlineKeyboardButton("No", callback_data=f"cnclno_{deal_id}")]
+    ])
 
 
 def get_cancel_proposal_buttons(deal_id):
     """Create the second cancellation confirmation buttons."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton(
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
             "Cancel Deal", callback_data=f"cncldeal_{deal_id}",
             style="danger"
-        ),
-        InlineKeyboardButton("Back", callback_data=f"cnclback_{deal_id}")
-    ]])
+        )],
+        [InlineKeyboardButton("Back", callback_data=f"cnclback_{deal_id}")]
+    ])
 
 
 async def send_cancel_request_message(
