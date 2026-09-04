@@ -1171,7 +1171,9 @@ async def room_is_ready_for_assignment(
     return True
 
 
-async def get_free_room_for_users(sender_user_id, mentioned_user_id, bot):
+async def get_free_room_for_users(
+    sender_user_id, mentioned_user_id, bot, preferred_room=None
+):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
     if userbot_client is None:
@@ -1188,7 +1190,11 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id, bot):
         )
         cleanliness_check = False
 
-    for room_num, room_data in rooms.items():
+    candidates = list(rooms.items())
+    if preferred_room in rooms:
+        candidates.sort(key=lambda item: item[0] != preferred_room)
+
+    for room_num, room_data in candidates:
         if room_data.get('status') == 'free':
             channel_id = room_data.get('channel_id')
             if channel_id:
@@ -5618,6 +5624,13 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mentioned_user = context.args[0]
 
+    preferred_room = None
+    if len(context.args) > 1:
+        try:
+            preferred_room = str(int(context.args[1]))
+        except ValueError:
+            preferred_room = None
+
     if not mentioned_user.startswith("@"):
         mentioned_user = "@" + mentioned_user
 
@@ -5682,7 +5695,7 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Find a free room where both users are not banned
     room_num, room_data = await get_free_room_for_users(
-        user_id, mentioned_user_id, context.bot
+        user_id, mentioned_user_id, context.bot, preferred_room=preferred_room
     )
 
     if room_num is None:
@@ -8450,7 +8463,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>📋 COMMAND LIST</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "<b>👥 General Commands:</b>\n"
-        "├ /escrow @username - Start escrow deal\n"
+        "├ /escrow @username [room] - Start escrow deal\n"
         "├ /profile [@username] - View 30-day deal stats\n"
         "├ /hide_volume - Hide your trading volume\n"
         "├ /show_volume - Show your trading volume\n"
