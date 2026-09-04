@@ -3,6 +3,8 @@ import random
 import asyncio
 import json
 import time
+import math
+import html
 import aiohttp
 import nest_asyncio
 import logging
@@ -40,13 +42,16 @@ def log_warning(message):
     logger.warning(message)
 
 from telegram import (  # noqa: E402
-    Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup
+    Update, ChatJoinRequest, InlineKeyboardButton, InlineKeyboardMarkup,
+    MessageEntity,
+    InlineQueryResultArticle, InputTextMessageContent
 )
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
-    ChatMemberHandler
+    ChatMemberHandler, InlineQueryHandler, ApplicationHandlerStop, TypeHandler
 )
+
 from telethon import TelegramClient  # noqa: E402
 from telethon.tl.functions.messages import (  # noqa: E402
     CreateChatRequest, ExportChatInviteRequest, MigrateChatRequest,
@@ -54,10 +59,14 @@ from telethon.tl.functions.messages import (  # noqa: E402
 )
 from telethon.tl.functions.channels import (  # noqa: E402
     ToggleJoinRequestRequest, EditAdminRequest, InviteToChannelRequest,
-    EditBannedRequest
+    EditBannedRequest, GetParticipantsRequest
 )
-from telethon.tl.functions.contacts import ResolveUsernameRequest  # noqa: E402
-from telethon.tl.types import ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins  # noqa: E402
+from telethon.tl.functions.contacts import ResolveUsernameRequest, ImportContactsRequest  # noqa: E402
+from telethon.tl.types import InputPhoneContact  # noqa: E402
+from telethon.tl.types import (
+    ChatAdminRights, Channel, ChatBannedRights, ChannelParticipantsAdmins,
+    ChannelParticipantsRecent, User
+)  # noqa: E402
 
 
 API_ID = os.environ.get("API_ID")
@@ -71,55 +80,173 @@ GROUP_DATA_FILE = "group_data.json"
 DEALS_FILE = "deals.json"
 ROOMS_FILE = "rooms.json"
 BANNED_USERS_FILE = "banned_users.json"
+OLD_ROOMS_FILE = "old_rooms.json"
 USER_2FA_FILE = "user_2fa.json"
 DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
+ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
+FORCE_ESCROW_FILE = "force_escrow.json"
+WORK_CHATS_FILE = "work_chats.json"
+DEAL_HISTORY_FILE = "deal_history.json"
+HIDDEN_VOLUME_FILE = "hidden_volume.json"
+HIDDEN_DEALS_FILE = "hidden_deals.json"
+PROFILE_OVERRIDES_FILE = "profile_overrides.json"
+
+# Default addresses and QR images (used if escrow_addresses.json doesn't exist)
+_DEFAULT_ADDRESSES = {
+    "USDT_BSC": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["bsc_address1_qr.jpg", "bsc_qr_2.jpg"]
+    },
+    "USDT_POLYGON": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["polygon_address1_qr.jpg", "polygon_qr_2.jpg"]
+    },
+    "USDT_SOL": {
+        "addresses": ["NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3", "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"],
+        "qr_images": ["sol_address1_qr.jpg", "sol_qr_2.jpg"]
+    },
+    "USDC_BSC": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265", "0xf282e789e835ed379aea84ece204d2d643e6774f"],
+        "qr_images": ["usdc_bsc_address1_qr.jpg", "usdc_bsc_qr_2.jpg"]
+    },
+    "USDC_POLYGON": {
+        "addresses": ["0x526F1629c3624643199c15d6eC2EBdF3Fde49265"],
+        "qr_images": ["usdc_polygon_address1_qr.jpg"]
+    },
+    "USDC_SOL": {
+        "addresses": ["NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3", "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"],
+        "qr_images": ["usdc_sol_qr_1.jpg", "usdc_sol_address1_qr.jpg"]
+    }
+}
+
+
+def load_escrow_addresses():
+    """Load escrow addresses from JSON file, or use defaults."""
+    try:
+        with open(ESCROW_ADDRESSES_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        # First run - save defaults to file
+        save_escrow_addresses(_DEFAULT_ADDRESSES)
+        return dict(_DEFAULT_ADDRESSES)
+
+
+def save_escrow_addresses(data=None):
+    """Save current escrow addresses to JSON file."""
+    if data is None:
+        data = _build_current_addresses()
+    with open(ESCROW_ADDRESSES_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _build_current_addresses():
+    """Build current addresses dict from in-memory arrays."""
+    return {
+        "USDT_BSC": {"addresses": list(BSC_DEPOSIT_ADDRESSES), "qr_images": list(BSC_QR_IMAGES)},
+        "USDT_POLYGON": {"addresses": list(POLYGON_DEPOSIT_ADDRESSES), "qr_images": list(POLYGON_QR_IMAGES)},
+        "USDT_SOL": {"addresses": list(SOL_DEPOSIT_ADDRESSES), "qr_images": list(SOL_QR_IMAGES)},
+        "USDC_BSC": {"addresses": list(USDC_BSC_DEPOSIT_ADDRESSES), "qr_images": list(USDC_BSC_QR_IMAGES)},
+        "USDC_POLYGON": {"addresses": [USDC_POLYGON_DEPOSIT_ADDRESS], "qr_images": [USDC_POLYGON_QR_IMAGE]},
+        "USDC_SOL": {"addresses": list(USDC_SOL_DEPOSIT_ADDRESSES), "qr_images": list(USDC_SOL_QR_IMAGES)},
+    }
+
+
+def _apply_addresses_from_data(data):
+    """Apply loaded address data to in-memory arrays."""
+    global USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+
+    d = data.get("USDT_BSC", {})
+    if d.get("addresses"):
+        BSC_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        BSC_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDT_POLYGON", {})
+    if d.get("addresses"):
+        POLYGON_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        POLYGON_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDT_SOL", {})
+    if d.get("addresses"):
+        SOL_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        SOL_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDC_BSC", {})
+    if d.get("addresses"):
+        USDC_BSC_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        USDC_BSC_QR_IMAGES[:] = d["qr_images"]
+
+    d = data.get("USDC_POLYGON", {})
+    if d.get("addresses"):
+        USDC_POLYGON_DEPOSIT_ADDRESS = d["addresses"][0]
+        USDC_POLYGON_QR_IMAGE = d["qr_images"][0]
+
+    d = data.get("USDC_SOL", {})
+    if d.get("addresses"):
+        USDC_SOL_DEPOSIT_ADDRESSES[:] = d["addresses"]
+        USDC_SOL_QR_IMAGES[:] = d["qr_images"]
+
+    # Refresh DEPOSIT_ADDRESSES dict
+    DEPOSIT_ADDRESSES["BSC"] = BSC_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["POLYGON"] = POLYGON_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["SOL"] = SOL_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["USDC_BSC"] = USDC_BSC_DEPOSIT_ADDRESSES[0]
+    DEPOSIT_ADDRESSES["USDC_POLYGON"] = USDC_POLYGON_DEPOSIT_ADDRESS
+    DEPOSIT_ADDRESSES["USDC_SOL"] = USDC_SOL_DEPOSIT_ADDRESSES[0]
+
+
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
-    "bsc_address2_qr.jpg"     # QR for Address 2
+    "bsc_qr_2.jpg"     # QR for Address 2
 ]
 POLYGON_QR_IMAGES = [
     "polygon_address1_qr.jpg",  # QR for Address 1
-    "polygon_address2_qr.jpg"   # QR for Address 2
+    "polygon_qr_2.jpg"   # QR for Address 2
 ]
 SOL_QR_IMAGES = [
     "sol_address1_qr.jpg",    # QR for Address 1
-    "sol_address2_qr.jpg"     # QR for Address 2
+    "sol_qr_2.jpg"     # QR for Address 2
 ]
 
 # USDT Deposit Addresses
 BSC_DEPOSIT_ADDRESSES = [
-    "0xa3D0e7da537057cbeC62A48235FbEc8BB38B4E08",  # Address 1
+    "0x526F1629c3624643199c15d6eC2EBdF3Fde49265",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 POLYGON_DEPOSIT_ADDRESSES = [
-    "0xFEc3e5E0cca5a924D0aD450DCF9fB13a51E4138F",  # Address 1
+    "0x526F1629c3624643199c15d6eC2EBdF3Fde49265",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
 SOL_DEPOSIT_ADDRESSES = [
-    "HmqfCsepGq8KNBLKZ2jSyLNsiKYjQK8mpYEmjkQi9weE",  # Address 1
+    "NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3",  # Address 1
     "5KDFAQ6p1ofPWZBGaxWTSu2EziyX9GyQ36H547zxBou3"   # Address 2
 ]
 
 # USDC Deposit Addresses
 USDC_BSC_QR_IMAGES = [
     "usdc_bsc_address1_qr.jpg",  # QR for Address 1
-    "usdc_bsc_address2_qr.jpg"   # QR for Address 2
+    "usdc_bsc_qr_2.jpg"   # QR for Address 2
 ]
 USDC_BSC_DEPOSIT_ADDRESSES = [
-    "0x9b4F87471a1648CAA3Cf8D87594a8eE321077FF7",  # Address 1
+    "0x526F1629c3624643199c15d6eC2EBdF3Fde49265",  # Address 1
     "0xf282e789e835ed379aea84ece204d2d643e6774f"   # Address 2
 ]
 
-# USDC Polygon - Address 1 only (Address 2 = same as Address 1)
-USDC_POLYGON_DEPOSIT_ADDRESS = "0x6a2757F5987a845D77f3DB441a3d0aB50a3A3A98"  # Address 1
-USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"  # QR for Address 1
+# USDC Polygon
+USDC_POLYGON_DEPOSIT_ADDRESS = "0x526F1629c3624643199c15d6eC2EBdF3Fde49265"
+USDC_POLYGON_QR_IMAGE = "usdc_polygon_address1_qr.jpg"
 
-# USDC Solana - Address 1 only (Address 2 = same as Address 1)
-USDC_SOL_DEPOSIT_ADDRESS = "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"  # Address 1
-USDC_SOL_QR_IMAGE = "usdc_sol_address1_qr.jpg"  # QR for Address 1
+# USDC Solana
+USDC_SOL_QR_IMAGES = [
+    "usdc_sol_qr_1.jpg",          # QR for Address 1
+    "usdc_sol_address1_qr.jpg"    # QR for Address 2
+]
+USDC_SOL_DEPOSIT_ADDRESSES = [
+    "NeT11YPWEr9aGacptszdXYFnJYETMGzS4vweVfQAnW3",  # Address 1
+    "9AHM8xU6rW6sC4hZJcpciaT64tqstcw5o7cWW31eKZB5"   # Address 2
+]
 
 DEPOSIT_ADDRESSES = {
     "BSC": BSC_DEPOSIT_ADDRESSES[0],
@@ -127,17 +254,37 @@ DEPOSIT_ADDRESSES = {
     "SOL": SOL_DEPOSIT_ADDRESSES[0],
     "USDC_BSC": USDC_BSC_DEPOSIT_ADDRESSES[0],
     "USDC_POLYGON": USDC_POLYGON_DEPOSIT_ADDRESS,
-    "USDC_SOL": USDC_SOL_DEPOSIT_ADDRESS
+    "USDC_SOL": USDC_SOL_DEPOSIT_ADDRESSES[0]
 }
 
 bsc_address_index = 0
 polygon_address_index = 0
 sol_address_index = 0
 usdc_bsc_address_index = 0
+usdc_sol_address_index = 0
 
-ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167]
+# State tracking for /changeaddy admin sessions
+# Key: user_id, Value: dict with slot, currency, network, step
+changeaddy_sessions = {}
+profile_cooldowns = {}
+clone_profile_sessions = {}
+sendmsg_sessions = {}
 
-DEAL_LOG_CHANNEL_ID = -1003266978268
+ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
+WORKLIST_ADMIN_ID = 6643621069
+
+# Extra admin added to every newly created escrow group (resolved by ID, then
+# username, then phone). ID is the source of truth; username may change.
+EXTRA_ADMIN_USER_ID = 6302273200
+EXTRA_ADMIN_USERNAME = "iUsrXD"
+EXTRA_ADMIN_PHONE = "+918288914135"
+
+# Only these admins are treated as admins for deal cancellation (the ones that
+# stay in the group after /clean and .empty). Every other admin is treated as a
+# normal user for cancel purposes (can only cancel a deal they're a party to).
+CANCEL_ADMIN_IDS = [6662820986, EXTRA_ADMIN_USER_ID]
+
+DEAL_LOG_CHANNEL_ID = -1004433511813
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
@@ -181,6 +328,8 @@ POLYGON_RPC_ENDPOINTS = [
     "https://polygon.llamarpc.com",
 ]
 
+CONFIRMATION_TARGET = 30
+
 # ERC20 Transfer event topic (keccak256 of "Transfer(address,address,uint256)")
 TRANSFER_EVENT_TOPIC = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
@@ -194,6 +343,12 @@ rooms = {}
 banned_users = {}
 user_2fa = {}
 deal_form_cache = {}
+force_escrow_users = {}
+work_chats = []
+deal_history = {}
+hidden_volume_users = {}
+hidden_deal_users = {}
+profile_overrides = {}
 
 
 def load_allowed_users():
@@ -252,6 +407,28 @@ def save_rooms():
         json.dump(rooms, f)
 
 
+old_rooms = []
+
+def load_old_rooms():
+    global old_rooms
+    try:
+        with open(OLD_ROOMS_FILE, "r") as f:
+            old_rooms = json.load(f)
+    except FileNotFoundError:
+        old_rooms = []
+
+def save_old_rooms():
+    with open(OLD_ROOMS_FILE, "w") as f:
+        json.dump(old_rooms, f)
+
+def add_old_room(channel_id, title=""):
+    """Store an old room's channel ID for later deletion."""
+    entry = {"channel_id": int(channel_id), "title": title}
+    if not any(r["channel_id"] == int(channel_id) for r in old_rooms):
+        old_rooms.append(entry)
+        save_old_rooms()
+
+
 def load_banned_users():
     global banned_users
     try:
@@ -292,6 +469,200 @@ def load_deal_form_cache():
 def save_deal_form_cache():
     with open(DEAL_FORM_CACHE_FILE, "w") as f:
         json.dump(deal_form_cache, f)
+
+
+
+def load_force_escrow():
+    global force_escrow_users
+    try:
+        with open(FORCE_ESCROW_FILE, "r") as f:
+            force_escrow_users = json.load(f)
+    except FileNotFoundError:
+        force_escrow_users = {}
+
+
+def save_force_escrow():
+    with open(FORCE_ESCROW_FILE, "w") as f:
+        json.dump(force_escrow_users, f)
+
+
+def load_work_chats():
+    global work_chats
+    try:
+        with open(WORK_CHATS_FILE, "r") as f:
+            loaded_chats = json.load(f)
+        work_chats = [int(chat_id) for chat_id in loaded_chats]
+    except (FileNotFoundError, TypeError, ValueError):
+        work_chats = []
+
+
+def save_work_chats():
+    with open(WORK_CHATS_FILE, "w") as f:
+        json.dump(work_chats, f)
+
+
+def load_deal_history():
+    global deal_history
+    try:
+        with open(DEAL_HISTORY_FILE, "r") as f:
+            deal_history = json.load(f)
+    except FileNotFoundError:
+        deal_history = {}
+
+
+def save_deal_history():
+    with open(DEAL_HISTORY_FILE, "w") as f:
+        json.dump(deal_history, f)
+
+
+def load_hidden_volume():
+    global hidden_volume_users
+    try:
+        with open(HIDDEN_VOLUME_FILE, "r") as f:
+            loaded_users = json.load(f)
+        if isinstance(loaded_users, dict):
+            hidden_volume_users = {
+                str(user_id): True for user_id in loaded_users
+            }
+        else:
+            hidden_volume_users = {}
+    except (FileNotFoundError, TypeError, ValueError):
+        hidden_volume_users = {}
+
+
+def save_hidden_volume():
+    with open(HIDDEN_VOLUME_FILE, "w") as f:
+        json.dump(hidden_volume_users, f)
+
+
+def load_hidden_deals():
+    global hidden_deal_users
+    try:
+        with open(HIDDEN_DEALS_FILE, "r") as f:
+            loaded_users = json.load(f)
+        if isinstance(loaded_users, dict):
+            hidden_deal_users = {
+                str(user_id): True for user_id in loaded_users
+            }
+        else:
+            hidden_deal_users = {}
+    except (FileNotFoundError, TypeError, ValueError):
+        hidden_deal_users = {}
+
+
+def save_hidden_deals():
+    with open(HIDDEN_DEALS_FILE, "w") as f:
+        json.dump(hidden_deal_users, f)
+
+
+def load_profile_overrides():
+    global profile_overrides
+    try:
+        with open(PROFILE_OVERRIDES_FILE, "r") as f:
+            loaded_overrides = json.load(f)
+        if isinstance(loaded_overrides, dict):
+            profile_overrides = {
+                str(user_id): override
+                for user_id, override in loaded_overrides.items()
+            }
+        else:
+            profile_overrides = {}
+    except (FileNotFoundError, TypeError, ValueError):
+        profile_overrides = {}
+
+
+def save_profile_overrides():
+    with open(PROFILE_OVERRIDES_FILE, "w") as f:
+        json.dump(profile_overrides, f)
+
+
+async def record_deal_result(deal, deal_id, status, chat_id):
+    """Persist a completed or cancelled deal for profile statistics."""
+    try:
+        if status not in ("completed", "cancelled"):
+            return
+
+        history_key = str(deal_id)
+        existing = deal_history.get(history_key)
+        if existing:
+            if (
+                existing.get("status") == "completed"
+                and status == "cancelled"
+            ) or existing.get("status") == status:
+                return
+
+        buyer = deal["buyer"]
+        seller = deal["seller"]
+        currency = deal["currency"]
+        amount = 0.0
+        try:
+            amount = float(deal.get("amount_crypto"))
+        except (TypeError, ValueError):
+            pass
+
+        group_info = group_data.get(str(chat_id), {})
+        identities = (
+            (
+                group_info.get("sender_user"),
+                group_info.get("sender_user_id")
+            ),
+            (
+                group_info.get("mentioned_user"),
+                group_info.get("mentioned_user_id")
+            )
+        )
+
+        async def resolve_user_id(username):
+            username_clean = str(username or "").lstrip("@").lower()
+            for known_username, known_user_id in identities:
+                if (
+                    username_clean
+                    == str(known_username or "").lstrip("@").lower()
+                ):
+                    try:
+                        return int(known_user_id)
+                    except (TypeError, ValueError):
+                        break
+
+            if not username_clean:
+                return None
+            try:
+                global userbot_client
+                if userbot_client is None:
+                    await init_userbot()
+                if userbot_client is not None:
+                    entity = await userbot_client.get_entity(username_clean)
+                    if isinstance(entity, User):
+                        return int(entity.id)
+            except Exception as resolve_error:
+                log_warning(
+                    f"Could not resolve deal user {username_clean}: "
+                    f"{resolve_error}"
+                )
+            return None
+
+        deal_history[history_key] = {
+            "status": status,
+            "ts": time.time(),
+            "currency": currency,
+            "amount": amount,
+            "buyer": str(buyer).lstrip("@").lower(),
+            "seller": str(seller).lstrip("@").lower(),
+            "buyer_id": await resolve_user_id(buyer),
+            "seller_id": await resolve_user_id(seller)
+        }
+        save_deal_history()
+    except Exception as history_error:
+        log_warning(
+            f"Could not record deal result for {deal_id}: {history_error}"
+        )
+
+
+def is_force_escrow_user(username):
+    """Check if a username is whitelisted to bypass the active-deal restriction."""
+    if not username:
+        return False
+    return username.lstrip('@').lower() in force_escrow_users
 
 
 def is_user_banned(user_id, username):
@@ -339,6 +710,33 @@ def get_user_active_deal(username):
     return None, None
 
 
+import re
+import base58
+
+
+def is_valid_evm_address(address):
+    """Check if address is a valid EVM (BSC/Polygon) hex address."""
+    return bool(re.fullmatch(r'0x[0-9a-fA-F]{40}', address))
+
+
+def is_valid_solana_address(address):
+    """Check if address is a valid Solana base58 address."""
+    try:
+        decoded = base58.b58decode(address)
+        return len(decoded) == 32
+    except Exception:
+        return False
+
+
+def is_valid_crypto_address(address, network):
+    """Validate a crypto address for the given network."""
+    if network in ("BSC", "POLYGON", "USDC_BSC", "USDC_POLYGON"):
+        return is_valid_evm_address(address)
+    elif network in ("SOL", "USDC_SOL"):
+        return is_valid_solana_address(address)
+    return False
+
+
 def truncate_address(address):
     """Truncate address to first 3 and last 4 characters."""
     if not address or len(address) < 8:
@@ -368,6 +766,7 @@ def build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_add
     parties_lines = ""
     if show_parties and buyer and seller and buyer != 'N/A' and seller != 'N/A':
         parties_lines = (
+            f"• <b>Deal ID</b> - #{deal_id}\n"
             f"• <b>Seller</b> - {seller}\n"
             f"• <b>Buyer</b> - {buyer}\n"
         )
@@ -532,10 +931,10 @@ async def update_deal_log(bot, deal_id, status):
         
         msg = build_deal_log_message(deal_id, buyer, seller, room_num, status, deposit_address, amount, token, escrow_sender, initiator_joined, counterparty_joined, mentioned_user, show_parties)
         
-        # Add "CHECK ESCROW DETAILS" button if deal has form data
+        # Add "DEAL INFO" button if deal has form data
         reply_markup = None
         if show_parties and deal.get('corrected_form_text'):
-            keyboard = [[InlineKeyboardButton("CHECK ESCROW DETAILS", callback_data=f"checkescrow_{deal_id}")]]
+            keyboard = [[InlineKeyboardButton("DEAL INFO", callback_data=f"checkescrow_{deal_id}")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
         
         await bot.edit_message_text(
@@ -557,7 +956,9 @@ async def check_user_banned_in_room(user_id, channel_id):
         await init_userbot()
     
     try:
-        full_channel_id = int(f"-100{channel_id}")
+        full_channel_id = get_marked_peer_id(channel_id)
+        if full_channel_id is None:
+            return False
         from telethon.tl.functions.channels import GetParticipantRequest
         from telethon.tl.types import ChannelParticipantBanned
         try:
@@ -574,20 +975,235 @@ async def check_user_banned_in_room(user_id, channel_id):
         return False
 
 
-async def get_free_room_for_users(sender_user_id, mentioned_user_id):
+def entity_has_username(entity):
+    """Return True if a Telethon user entity has any active username.
+
+    Accounts for the newer multiple/collectible usernames feature where the
+    primary `username` field may be None while active usernames live in the
+    `usernames` list.
+    """
+    if getattr(entity, 'username', None):
+        return True
+    for u in getattr(entity, 'usernames', None) or []:
+        if getattr(u, 'active', False) and getattr(u, 'username', None):
+            return True
+    return False
+
+
+def get_marked_peer_id(channel_id):
+    """Normalize a stored room channel id to a Telethon marked peer id."""
+    if channel_id is None:
+        return None
+
+    channel_str = str(channel_id).strip()
+    if not channel_str:
+        return None
+    if channel_str.startswith("-100"):
+        try:
+            return int(channel_str)
+        except ValueError:
+            return None
+    try:
+        return int(f"-100{channel_str.lstrip('-')}")
+    except ValueError:
+        return None
+
+
+def parse_work_chat_id(value):
+    """Parse a raw or marked numeric Telegram chat id."""
+    chat_id = str(value).strip()
+    if chat_id.startswith("@"):
+        return None
+    try:
+        return int(chat_id)
+    except ValueError:
+        return None
+
+
+def is_work_chat(chat_id):
+    """Return True when a chat matches an entry in the working list."""
+    try:
+        parsed_chat_id = int(chat_id)
+    except (TypeError, ValueError):
+        return False
+    if parsed_chat_id in work_chats:
+        return True
+
+    marked_chat_id = get_marked_peer_id(parsed_chat_id)
+    if marked_chat_id is None:
+        return False
+    return any(
+        get_marked_peer_id(stored_chat_id) == marked_chat_id
+        for stored_chat_id in work_chats
+    )
+
+
+def is_worklist_management_update(update):
+    """Return True for an authorized worklist-management command."""
+    user = update.effective_user
+    message = update.effective_message
+    if not user or user.id != WORKLIST_ADMIN_ID or not message:
+        return False
+
+    text = message.text or ""
+    if not text.startswith("/"):
+        return False
+    command = text.split()[0].split("@", 1)[0].lower()
+    return command in {"/addchat", "/removechat", "/worklist"}
+
+
+async def whitelist_gate(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Drop updates from chats outside the configured working list."""
+    chat = update.effective_chat
+    if is_worklist_management_update(update):
+        return
+    if not chat:
+        return
+    if chat.type == "private" or is_work_chat(chat.id):
+        return
+    if chat.id == DEAL_LOG_CHANNEL_ID:
+        return
+
+    marked_chat_id = get_marked_peer_id(chat.id)
+    if marked_chat_id is not None:
+        for room_data in rooms.values():
+            if get_marked_peer_id(room_data.get("channel_id")) == marked_chat_id:
+                return
+
+        finished_statuses = {
+            "completed", "cancelled", "released", "payment_released"
+        }
+        for deal in deals.values():
+            if (
+                get_marked_peer_id(deal.get("channel_id")) == marked_chat_id
+                and deal.get("status") not in finished_statuses
+            ):
+                return
+
+    raise ApplicationHandlerStop
+
+
+def room_has_active_deal(channel_id):
+    """Return True if a room's channel has a deal that isn't finished."""
+    channel_id_str = str(channel_id).replace("-100", "") if str(channel_id).startswith("-100") else str(channel_id)
+    finished = ('completed', 'cancelled', 'released', 'payment_released')
+    for deal in deals.values():
+        if str(deal.get('channel_id')) == channel_id_str:
+            if deal.get('status', '') not in finished:
+                return True
+    return False
+
+
+def protected_from_removal_ids(bot_id, userbot_id):
+    """IDs that must never be kicked/banned from escrow rooms."""
+    return {bot_id, userbot_id, 6662820986, EXTRA_ADMIN_USER_ID}
+
+
+async def resolve_extra_admin(client):
+    """Resolve the extra-admin user via ID, username, or phone (with contact import).
+
+    Returns the Telethon user entity, or None if it cannot be resolved.
+    """
+    for label, identifier in (
+        ("id", EXTRA_ADMIN_USER_ID),
+        ("username", EXTRA_ADMIN_USERNAME),
+        ("phone", EXTRA_ADMIN_PHONE),
+    ):
+        try:
+            entity = await client.get_entity(identifier)
+            if entity is not None:
+                return entity
+        except Exception as e:
+            log_warning(f"Extra admin resolve by {label} failed: {e}")
+    try:
+        imported = await client(ImportContactsRequest(
+            contacts=[InputPhoneContact(
+                client_id=0,
+                phone=EXTRA_ADMIN_PHONE,
+                first_name="Escrow",
+                last_name="Admin"
+            )]
+        ))
+        if imported.users:
+            return imported.users[0]
+        log_warning("Extra admin phone import returned no users")
+    except Exception as e:
+        log_warning(f"Extra admin phone import failed: {e}")
+    return None
+
+
+async def room_is_ready_for_assignment(
+    room_num, room_data, entity, allowed_ids
+):
+    """Return True if a free room is correctly named, deal-free and empty."""
+    room_number = room_data.get('room_number', room_num)
+    expected_title = f"Crypto India Escrow Room {room_number}"
+    title = getattr(entity, 'title', '') or ''
+    if title != expected_title:
+        log_warning(
+            f"Room {room_num} title is '{title}', expected "
+            f"'{expected_title}', skipping"
+        )
+        return False
+    if room_has_active_deal(room_data.get('channel_id')):
+        log_warning(f"Room {room_num} has an ongoing deal, skipping")
+        return False
+    try:
+        participants = await userbot_client(GetParticipantsRequest(
+            channel=entity,
+            filter=ChannelParticipantsRecent(),
+            offset=0,
+            limit=200,
+            hash=0
+        ))
+    except Exception as participants_error:
+        log_warning(
+            f"Could not get participants for room {room_num}: "
+            f"{participants_error}"
+        )
+        return False
+    outsiders = [u.id for u in participants.users if u.id not in allowed_ids]
+    if outsiders:
+        log_warning(
+            f"Room {room_num} still has members {outsiders}, skipping"
+        )
+        return False
+    return True
+
+
+async def get_free_room_for_users(
+    sender_user_id, mentioned_user_id, bot, preferred_room=None
+):
     """Get a free room where both users are not banned and the group still exists."""
     global userbot_client
     if userbot_client is None:
         await init_userbot()
-    
-    for room_num, room_data in rooms.items():
+
+    cleanliness_check = True
+    try:
+        allowed_ids = set(ADMIN_USER_IDS)
+        allowed_ids.add((await userbot_client.get_me()).id)
+        allowed_ids.add((await bot.get_me()).id)
+    except Exception as ids_error:
+        log_warning(
+            f"Could not get room-assignment participant IDs: {ids_error}"
+        )
+        cleanliness_check = False
+
+    candidates = list(rooms.items())
+    if preferred_room in rooms:
+        candidates.sort(key=lambda item: item[0] != preferred_room)
+
+    for room_num, room_data in candidates:
         if room_data.get('status') == 'free':
             channel_id = room_data.get('channel_id')
             if channel_id:
                 # First verify the group still exists
                 try:
-                    full_channel_id = int(f"-100{channel_id}")
-                    await userbot_client.get_entity(full_channel_id)
+                    full_channel_id = get_marked_peer_id(channel_id)
+                    if full_channel_id is None:
+                        raise ValueError("Invalid channel_id")
+                    entity = await userbot_client.get_entity(full_channel_id)
                 except Exception:
                     # Group doesn't exist, skip this room
                     log_warning(f"Room {room_num} group not accessible, skipping")
@@ -596,6 +1212,13 @@ async def get_free_room_for_users(sender_user_id, mentioned_user_id):
                 sender_banned = await check_user_banned_in_room(sender_user_id, channel_id)
                 mentioned_banned = await check_user_banned_in_room(mentioned_user_id, channel_id)
                 if not sender_banned and not mentioned_banned:
+                    if (
+                        cleanliness_check
+                        and not await room_is_ready_for_assignment(
+                            room_num, room_data, entity, allowed_ids
+                        )
+                    ):
+                        continue
                     return room_num, room_data
     return None, None
 
@@ -641,7 +1264,7 @@ def get_room_by_channel_id(channel_id):
 
 
 def generate_deal_id():
-    return f"D{random.randint(1000, 9999)}"
+    return f"D{random.randint(36432, 99999)}"
 
 
 def parse_deal_form(text):
@@ -734,17 +1357,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="6253755610299372930"
                 ),
                 InlineKeyboardButton(
-                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
-                    style="primary"
+                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
+                    style="primary", icon_custom_emoji_id="6255864821493796954"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL",
-                    style="primary"
+                    "USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON",
+                    style="primary", icon_custom_emoji_id="6253279916901535974"
                 )
             ],
             [
@@ -759,17 +1382,17 @@ def get_network_buttons(deal_id, currency="USDT"):
             [
                 InlineKeyboardButton(
                     "USDT[BSC]", callback_data=f"network_{deal_id}_BSC",
-                    style="primary"
+                    style="primary", icon_custom_emoji_id="6253755610299372930"
                 ),
                 InlineKeyboardButton(
-                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
-                    style="primary"
+                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
+                    style="primary", icon_custom_emoji_id="6255864821493796954"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "USDT[SOL]", callback_data=f"network_{deal_id}_SOL",
-                    style="primary"
+                    "USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON",
+                    style="primary", icon_custom_emoji_id="6253279916901535974"
                 )
             ],
             [
@@ -805,7 +1428,8 @@ def get_confirm_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "Confirm[Seller]", callback_data=f"confirm_{deal_id}_seller"
+                "Confirm[Seller]", callback_data=f"confirm_{deal_id}_seller",
+                style="primary"
             ),
             InlineKeyboardButton(
                 "Confirm[Buyer]", callback_data=f"confirm_{deal_id}_buyer"
@@ -826,7 +1450,8 @@ def get_deposit_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "I HAVE PAID", callback_data=f"ihavepaid_{deal_id}"
+                "I HAVE PAID", callback_data=f"ihavepaid_{deal_id}",
+                style="primary"
             )
         ],
         [
@@ -896,13 +1521,145 @@ def get_usdc_bsc_deposit_info():
     return address, qr_image
 
 
-def build_deposit_message(deal, deal_id):
+def get_usdc_sol_deposit_info():
+    """Get rotating USDC SOL deposit address and QR image."""
+    global usdc_sol_address_index
+    address = USDC_SOL_DEPOSIT_ADDRESSES[usdc_sol_address_index]
+    qr_image = USDC_SOL_QR_IMAGES[usdc_sol_address_index]
+    usdc_sol_address_index = (usdc_sol_address_index + 1) % len(USDC_SOL_DEPOSIT_ADDRESSES)
+    return address, qr_image
+
+
+def format_deposit_amount(amount):
+    """Render a deal amount with at least one decimal place."""
+    raw = str(
+        amount if amount not in (None, "") else "0"
+    ).replace(",", "").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return raw
+    if not math.isfinite(value):
+        return raw
+    if value == int(value):
+        return f"{value:.1f}"
+    if "." in raw:
+        return raw
+    return ("%f" % value).rstrip("0")
+
+
+async def resolve_deal_party(deal, role, bot):
+    """Resolve a deal party's first name and Telegram user ID."""
+    username = str(deal.get(role) or "")
+    username_clean = username.lstrip("@").lower()
+    user_id_key = f"{role}_user_id"
+    first_name_key = f"{role}_first_name"
+    user_id = deal.get(user_id_key)
+    first_name = deal.get(first_name_key)
+    entity = None
+
+    try:
+        user_id = int(user_id) if user_id is not None else None
+        if user_id is not None and user_id <= 0:
+            user_id = None
+    except (TypeError, ValueError):
+        user_id = None
+
+    if user_id is None:
+        group_info = group_data.get(str(deal.get("chat_id")), {})
+        if not isinstance(group_info, dict):
+            group_info = {}
+        identities = (
+            (
+                group_info.get("sender_user"),
+                group_info.get("sender_user_id")
+            ),
+            (
+                group_info.get("mentioned_user"),
+                group_info.get("mentioned_user_id")
+            )
+        )
+        for known_username, known_user_id in identities:
+            if (
+                username_clean
+                == str(known_username or "").lstrip("@").lower()
+            ):
+                try:
+                    user_id = int(known_user_id)
+                    if user_id <= 0:
+                        user_id = None
+                except (TypeError, ValueError):
+                    user_id = None
+                if user_id is not None:
+                    break
+
+    if user_id is None and username_clean:
+        try:
+            global userbot_client
+            if userbot_client is None:
+                await init_userbot()
+            if userbot_client is not None:
+                entity = await userbot_client.get_entity(username_clean)
+                if isinstance(entity, User):
+                    user_id = int(entity.id)
+                    if user_id <= 0:
+                        user_id = None
+                    else:
+                        first_name = entity.first_name
+        except Exception as resolve_error:
+            log_warning(
+                f"Could not resolve deal {role} {username_clean}: "
+                f"{resolve_error}"
+            )
+
+    if user_id is not None and not deal.get(user_id_key):
+        deal[user_id_key] = user_id
+
+    if user_id is not None and not first_name:
+        try:
+            member = await bot.get_chat_member(deal["chat_id"], user_id)
+            first_name = member.user.first_name
+        except Exception as member_error:
+            log_warning(
+                f"Could not resolve deal {role} name for {user_id}: "
+                f"{member_error}"
+            )
+
+    if not first_name and isinstance(entity, User):
+        first_name = entity.first_name
+    if first_name and not deal.get(first_name_key):
+        deal[first_name_key] = first_name
+
+    display_name = first_name or username.lstrip("@") or "Unknown"
+    return display_name, user_id
+
+
+def format_party_link(display_name, user_id, role):
+    """Format a deal party's escaped display name and role."""
+    escaped_name = html.escape(str(display_name or "Unknown"))
+    role_label = role.capitalize()
+    if user_id is not None:
+        return (
+            f'<a href="tg://user?id={user_id}">'
+            f"{escaped_name} [{role_label}]</a>"
+        )
+    return f"{escaped_name} [{role_label}]"
+
+
+def format_party_name_link(display_name, user_id):
+    """Format a deal party's escaped display name without the role label."""
+    escaped_name = html.escape(str(display_name or "Unknown"))
+    if user_id is not None:
+        return f'<a href="tg://user?id={user_id}">{escaped_name}</a>'
+    return escaped_name
+
+
+async def build_deposit_message(deal, deal_id, bot):
     """Build the deposit message for seller."""
     currency = deal['currency']
     network = deal.get('network', 'BSC')
     network_name = get_network_display_name(network)
-    amount = deal.get('amount_crypto', '0')
-    seller = deal['seller']
+    amount = format_deposit_amount(deal.get('amount_crypto', '0'))
 
     # Check if deal already has deposit address assigned (avoid re-rotation)
     if deal.get('deposit_address'):
@@ -946,7 +1703,10 @@ def build_deposit_message(deal, deal_id):
                 elif network == "USDC_POLYGON":
                     qr_image = USDC_POLYGON_QR_IMAGE
                 elif network == "USDC_SOL":
-                    qr_image = USDC_SOL_QR_IMAGE
+                    for i, addr in enumerate(USDC_SOL_DEPOSIT_ADDRESSES):
+                        if addr.lower() == deposit_address.lower():
+                            qr_image = USDC_SOL_QR_IMAGES[i]
+                            break
             if qr_image:
                 deal['qr_image'] = qr_image
     else:
@@ -991,8 +1751,11 @@ def build_deposit_message(deal, deal_id):
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
         elif network == "USDC_SOL":
-            deposit_address = USDC_SOL_DEPOSIT_ADDRESS
-            qr_image = USDC_SOL_QR_IMAGE
+            if fixed_index is not None and fixed_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
+                deposit_address = USDC_SOL_DEPOSIT_ADDRESSES[fixed_index]
+                qr_image = USDC_SOL_QR_IMAGES[fixed_index]
+            else:
+                deposit_address, qr_image = get_usdc_sol_deposit_info()
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
         else:
@@ -1001,19 +1764,24 @@ def build_deposit_message(deal, deal_id):
             deal['deposit_address'] = deposit_address
             deal['qr_image'] = qr_image
 
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
+
     msg = (
-        f"Deal [#{deal_id}]\n"
-        f"NOTE: {seller} [Seller] <b>DEPOSIT EXACT</b> "
-        f"<b><u>{amount}</u></b> <b>{currency}</b>. "
-        f"DO NOT INCLUDE NETWORK FEE, make sure the amount received is "
-        f"exact!\n"
-        f"<b>Example</b>: If your withdrawal fee is 0.2 {currency} then send "
-        f"<b><u>{float(str(amount).replace(',', '')) + 0.2:.1f}</u></b>{currency} so the received "
-        f"amount is <b><u>{amount}</u></b> {currency}\n\n"
-        f"Deposit Address: <code>{deposit_address}</code>\n"
-        f"Chain: <code>{network_name}</code>\n\n"
-        f"Please click 'I Have Paid' <b>ONLY</b> when you have made the "
-        f"Payment."
+        f"<b>Deal</b> #{deal_id}\n\n"
+        f"<u><b>Instruction for</b> {seller_part}</u>\n\n"
+        f"Please deposit at the following credentials...\n\n"
+        f"<b>Address:</b> <code>{deposit_address}</code>\n"
+        f"<b>Chain:</b> {network_name}\n"
+        f"<b>Token:</b> {currency}\n"
+        f"<b>Amount:</b> <code>{amount}</code>\n\n"
+        f"Please click <b>I Have Paid</b> only after {currency} is sent.\n\n"
+        f"<u><b>Instruction for</b> {buyer_part}</u>\n\n"
+        f"Do <b>NOT</b> pay INR to Seller before {currency} deposit to the "
+        f"Bot address. Bot will prompt you to do so after {currency} deposit "
+        f"is done."
     )
 
     return msg
@@ -1080,6 +1848,51 @@ def build_deal_summary(deal, deal_id, both_confirmed=False):
         )
 
     return msg
+
+
+async def get_evm_block_number(base_network):
+    """Get the latest EVM block number using configured RPC fallbacks."""
+    if base_network == "BSC":
+        rpc_endpoints = BSC_RPC_ENDPOINTS
+    elif base_network == "POLYGON":
+        rpc_endpoints = POLYGON_RPC_ENDPOINTS
+    else:
+        return None
+
+    timeout = aiohttp.ClientTimeout(total=15)
+    block_payload = {
+        "jsonrpc": "2.0",
+        "method": "eth_blockNumber",
+        "params": [],
+        "id": 1
+    }
+
+    for rpc_endpoint in rpc_endpoints:
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(
+                    rpc_endpoint,
+                    json=block_payload,
+                    headers={"Content-Type": "application/json"}
+                ) as response:
+                    if response.status != 200:
+                        log_warning(
+                            f"{base_network} RPC {rpc_endpoint} error getting block number: "
+                            f"{response.status}"
+                        )
+                        continue
+                    data = await response.json()
+                    if "error" in data:
+                        log_warning(f"{base_network} RPC {rpc_endpoint} error: {data['error']}")
+                        continue
+                    return int(data["result"], 16)
+        except asyncio.TimeoutError:
+            log_warning(f"{base_network} RPC {rpc_endpoint} timeout")
+        except Exception as e:
+            log_warning(f"{base_network} RPC {rpc_endpoint} error: {e}")
+
+    log_warning(f"All {base_network} RPC endpoints failed getting block number")
+    return None
 
 
 async def check_bsc_transactions(deposit_address, usdt_contract, monitoring_start_time=None):
@@ -1436,17 +2249,20 @@ def get_deal_buttons(deal_id):
     keyboard = [
         [
             InlineKeyboardButton(
-                "Release Payment", callback_data=f"release_{deal_id}"
+                "Release Payment", callback_data=f"release_{deal_id}",
+                style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                "Partial Release Payment", callback_data=f"partial_{deal_id}"
+                "Partial Release Payment", callback_data=f"partial_{deal_id}",
+                style="primary"
             )
         ],
         [
             InlineKeyboardButton(
-                "Dispute", callback_data=f"dispute_{deal_id}"
+                "Dispute", callback_data=f"dispute_{deal_id}",
+                style="primary"
             ),
             InlineKeyboardButton(
                 "CANCEL", callback_data=f"dealcancel_{deal_id}",
@@ -1457,10 +2273,10 @@ def get_deal_buttons(deal_id):
     return InlineKeyboardMarkup(keyboard)
 
 
-def build_payment_detected_message(deal_id, amount, total, deal_amount, curr):
+def build_payment_detected_message(
+    deal_id, amount, total, deal_amount, curr, confirmations
+):
     """Build payment detected message."""
-    confirmations = "48/30"
-
     msg = (
         f"<b><i>Deal</i></b> #{deal_id}\n\n"
         f"<b>Payment Detected Successfully</b>\n\n"
@@ -1484,15 +2300,23 @@ def build_payment_detected_message(deal_id, amount, total, deal_amount, curr):
     return msg
 
 
-def build_usdt_received_message(deal, deal_id, received_amount):
+async def build_usdt_received_message(deal, deal_id, received_amount, bot):
     """Build USDT received message."""
     currency = deal['currency']
     deal_amount = float(deal.get('amount_crypto', '0'))
     escrow_fee = calculate_escrow_fee(str(deal_amount))
     to_release = received_amount - escrow_fee
     inr_amount = deal.get('amount_inr', '0')
-    buyer = deal['buyer']
-    seller = deal['seller']
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    payment_type = deal.get('payment_details_type', 'text')
+    payment_details = (
+        deal.get('payment_details', '')
+        if payment_type == 'text'
+        else '[See image above]'
+    )
 
     msg = (
         f"<b><u>Deal</u></b> #{deal_id}\n\n"
@@ -1502,15 +2326,19 @@ def build_usdt_received_message(deal, deal_id, received_amount):
         f"To Be Released: <b><u>{to_release:.2f} {currency}</u></b>\n"
         f"Amount to be Sent: <b><u>{inr_amount} INR</u></b>\n"
         f"Escrow Fee: <b><u>{escrow_fee:.2f} {currency}</u></b>\n\n"
-        f"{buyer} & {seller} proceed with your deal.\n\n"
-        f"{seller} release payment <b><u>ONLY</u></b> after Deal Completion.\n"
-        f"Please note that this process is irreversible."
+        f"<u><b>Instruction for</b> {buyer_part}</u>\n\n"
+        f"Please pay through...\n\n"
+        f"{payment_details}\n\n"
+        f"<u><b>Instruction for</b> {seller_part}</u>\n\n"
+        f"Please note that {currency} release is an irreversible process. "
+        f"Do <b>NOT</b> release {currency} to the Buyer before confirming "
+        f"payment at your end."
     )
 
     return msg
 
 
-def build_payment_details_message(deal, deal_id):
+def build_payment_details_message(deal, deal_id, custom_emoji=True):
     """Build payment details message for buyer."""
     payment_details = deal.get('payment_details', '')
     payment_type = deal.get('payment_details_type', 'text')
@@ -1526,12 +2354,21 @@ def build_payment_details_message(deal, deal_id):
     else:
         msg += "[See image above]\n\n"
 
+    msg += f"{buyer} pay INR to the above details to complete the deal.\n\n"
     msg += (
-        f"{buyer} pay INR to the above details to complete the deal.\n\n"
-        f"⚠️ Only use payment details provided in this Escrow Group for the "
-        f"transaction! Do <b>NOT</b> trust any payment requests or details "
-        f"sent by the seller via DM."
+        "⚠️ Only use payment details provided in this Escrow Group for the "
+        "transaction! Do <b>NOT</b> trust any payment requests or details "
+        "sent by the seller via DM, "
     )
+    if custom_emoji:
+        msg += (
+            '<tg-emoji emoji-id="5769655647205334747">💬</tg-emoji> '
+            "WhatsApp, or "
+            '<tg-emoji emoji-id="5769643728671088908">📞</tg-emoji> '
+            "phone call."
+        )
+    else:
+        msg += "💬 WhatsApp, or 📞 phone call."
 
     return msg
 
@@ -1555,6 +2392,297 @@ async def update_current_stage_button(bot, deal, chat_id, new_msg_id):
         )
     except Exception:
         pass
+
+
+async def send_payment_details(bot, deal, deal_id, chat_id):
+    """Send the payment details message, retrying without custom emoji."""
+    payment_type = deal.get('payment_details_type', 'text')
+    send_as_photo_options = [True, False] if payment_type == 'photo' else [False]
+
+    for send_as_photo in send_as_photo_options:
+        for custom_emoji in (True, False):
+            try:
+                details_msg = build_payment_details_message(
+                    deal, deal_id, custom_emoji=custom_emoji
+                )
+                if send_as_photo:
+                    sent_details = await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=deal.get('payment_details'),
+                        caption=details_msg,
+                        parse_mode="HTML"
+                    )
+                else:
+                    sent_details = await bot.send_message(
+                        chat_id=chat_id,
+                        text=details_msg,
+                        parse_mode="HTML"
+                    )
+                return sent_details
+            except Exception as send_error:
+                if custom_emoji:
+                    message_kind = (
+                        "payment details photo"
+                        if send_as_photo
+                        else "payment details"
+                    )
+                    log_warning(
+                        f"Could not send {message_kind} with custom emoji "
+                        f"for deal {deal_id}: {send_error}"
+                    )
+                elif send_as_photo:
+                    log_warning(
+                        f"Could not send payment details photo for deal "
+                        f"{deal_id}: {send_error}"
+                    )
+                else:
+                    log_warning(
+                        f"Could not send payment details for deal "
+                        f"{deal_id}: {send_error}"
+                    )
+
+    return None
+
+
+async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount):
+    """Send the post-confirmation payment messages."""
+    try:
+        await update_deal_log(bot, deal_id, "Payment Received")
+    except Exception as log_error:
+        log_warning(f"Could not update payment received log for deal {deal_id}: {log_error}")
+
+    try:
+        received_msg = await build_usdt_received_message(
+            deal, deal_id, received_amount, bot
+        )
+        received_sent = await bot.send_message(
+            chat_id=chat_id,
+            text=received_msg,
+            parse_mode="HTML",
+            reply_markup=get_deal_buttons(deal_id)
+        )
+        deal['received_msg_id'] = received_sent.message_id
+    except Exception as received_error:
+        log_warning(f"Could not send payment received message for deal {deal_id}: {received_error}")
+
+    sent_details = await send_payment_details(bot, deal, deal_id, chat_id)
+
+    if sent_details:
+        await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
+
+
+async def resolve_cancel_parties(deal, bot):
+    """Resolve both parties for cancellation messages and authorization."""
+    seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
+    buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
+    return {
+        "seller": (seller_name, seller_id),
+        "buyer": (buyer_name, buyer_id),
+    }
+
+
+async def resolve_cancel_actor(deal, bot, user_id, username):
+    """Return the role and party data for an authorized deal participant."""
+    parties = await resolve_cancel_parties(deal, bot)
+    username_clean = (username or "").lstrip("@").lower()
+    for role in ("seller", "buyer"):
+        _, party_id = parties[role]
+        if party_id is not None:
+            if user_id == party_id:
+                return role, parties
+        elif username_clean == deal[role].lstrip("@").lower():
+            return role, parties
+    return None, parties
+
+
+def build_cancel_note(currency, seller_part):
+    """Build the shared cancellation warning."""
+    return (
+        f"<b>Note:</b> Upon confirmation, the deal will be canceled. "
+        f"Any deposited {currency} will be refunded to {seller_part} after "
+        f"deducting 0.5 {currency} (Cancellation charge). Please be aware "
+        f"that this action is irreversible."
+    )
+
+
+def build_cancel_request_message(deal_id, requester_part, note):
+    """Build the first cancellation confirmation message."""
+    return (
+        f"<b><u>Deal</u></b> [#{deal_id}]\n\n"
+        f"{requester_part} do you sure you want to <b>cancel</b> this deal?\n\n"
+        f"{note}"
+    )
+
+
+def build_cancel_proposal_message(
+    deal_id, requester_part, other_part, note
+):
+    """Build the second cancellation confirmation message."""
+    return (
+        f"<b><u>Deal</u></b> [#{deal_id}]\n\n"
+        f"{requester_part} has proposed to cancel this deal.\n\n"
+        f"{other_part} please confirm cancellation.\n\n"
+        f"{note}"
+    )
+
+
+def build_cancel_final_message(deal_id):
+    """Build the final cancellation message."""
+    return (
+        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+        f"The deal has been canceled by users.\n\n"
+        f"Please use /clean before leaving the group."
+    )
+
+
+def get_cancel_request_buttons(deal_id):
+    """Create the first cancellation confirmation buttons."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "Yes", callback_data=f"cnclyes_{deal_id}", style="danger"
+        )],
+        [InlineKeyboardButton("No", callback_data=f"cnclno_{deal_id}")]
+    ])
+
+
+def get_cancel_proposal_buttons(deal_id):
+    """Create the second cancellation confirmation buttons."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(
+            "Cancel Deal", callback_data=f"cncldeal_{deal_id}",
+            style="danger"
+        )],
+        [InlineKeyboardButton("Back", callback_data=f"cnclback_{deal_id}")]
+    ])
+
+
+async def send_cancel_request_message(
+    bot, chat_id, deal_id, deal, requester_role, parties
+):
+    """Send the first cancellation confirmation message."""
+    seller_name, seller_id = parties["seller"]
+    requester_name, requester_id = parties[requester_role]
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    requester_part = format_party_link(
+        requester_name, requester_id, requester_role
+    )
+    note = build_cancel_note(deal.get("currency", "USDT"), seller_part)
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_request_message(
+                deal_id, requester_part, note
+            ),
+            parse_mode="HTML",
+            reply_markup=get_cancel_request_buttons(deal_id)
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send cancellation request for deal {deal_id}: "
+            f"{send_error}"
+        )
+        return None
+
+
+async def send_cancel_proposal_message(
+    bot, chat_id, deal_id, deal, requester_role, parties
+):
+    """Send the second cancellation confirmation message."""
+    seller_name, seller_id = parties["seller"]
+    requester_name, requester_id = parties[requester_role]
+    other_role = "buyer" if requester_role == "seller" else "seller"
+    other_name, other_id = parties[other_role]
+    seller_part = format_party_link(seller_name, seller_id, "seller")
+    requester_part = format_party_link(
+        requester_name, requester_id, requester_role
+    )
+    other_part = format_party_link(other_name, other_id, other_role)
+    note = build_cancel_note(deal.get("currency", "USDT"), seller_part)
+    try:
+        return await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_proposal_message(
+                deal_id, requester_part, other_part, note
+            ),
+            parse_mode="HTML",
+            reply_markup=get_cancel_proposal_buttons(deal_id)
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send cancellation proposal for deal {deal_id}: "
+            f"{send_error}"
+        )
+        return None
+
+
+async def delete_cancel_message(bot, chat_id, message_id, deal_id):
+    """Delete a cancellation flow message without blocking its transition."""
+    try:
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as delete_error:
+        log_warning(
+            f"Could not delete cancellation message for deal {deal_id}: "
+            f"{delete_error}"
+        )
+
+
+async def remove_deal_buttons_for_cancellation(bot, deal, chat_id, deal_id):
+    """Remove every tracked deal button before cancellation."""
+    for key in (
+        "deposit_msg_id",
+        "summary_msg_id",
+        "buyer_address_msg_id",
+        "seller_address_msg_id",
+        "payment_details_msg_id",
+        "received_msg_id",
+    ):
+        message_id = deal.get(key)
+        if not message_id:
+            continue
+        try:
+            await bot.edit_message_reply_markup(
+                chat_id=chat_id,
+                message_id=message_id,
+                reply_markup=None
+            )
+        except Exception as edit_error:
+            log_warning(
+                f"Could not remove buttons from {key} for deal {deal_id}: "
+                f"{edit_error}"
+            )
+
+
+async def cancel_deal_after_confirmation(
+    bot, deal, deal_id, chat_id, cancel_message_id
+):
+    """Complete a user-confirmed cancellation."""
+    await remove_deal_buttons_for_cancellation(
+        bot, deal, chat_id, deal_id
+    )
+    await delete_cancel_message(bot, chat_id, cancel_message_id, deal_id)
+
+    if deal_id in active_monitors:
+        del active_monitors[deal_id]
+
+    room_num = get_room_by_channel_id(chat_id)
+    if room_num:
+        mark_room_free(room_num)
+
+    await record_deal_result(deal, deal_id, "cancelled", chat_id)
+    del deals[deal_id]
+    save_deals()
+
+    try:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=build_cancel_final_message(deal_id),
+            parse_mode="HTML"
+        )
+    except Exception as final_error:
+        log_warning(
+            f"Could not send final cancellation message for deal {deal_id}: "
+            f"{final_error}"
+        )
 
 
 async def monitor_blockchain(deal_id, chat_id, bot):
@@ -1588,63 +2716,83 @@ async def monitor_blockchain(deal_id, chat_id, bot):
 
         total_received = 0
         latest_amount = 0
+        detected_transactions = []
 
         for tx in transactions:
             if tx.get("to", "").lower() == deposit_address.lower():
+                detected_transactions.append(tx)
                 amount = parse_transaction_amount(tx, network)
                 total_received += amount
                 if amount > latest_amount:
                     latest_amount = amount
 
         if total_received > 0:
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
             deal['received_amount'] = total_received
-            deal['status'] = 'payment_received'
             save_deals()
 
             # Update deal log - Deposit Detected with amount
             await update_deal_log(bot, deal_id, f"Deposit Detected [ {total_received} {currency} ]")
 
-            detected_msg = build_payment_detected_message(
-                deal_id, latest_amount, total_received, deal_amount, currency
-            )
-            await bot.send_message(
-                chat_id=chat_id,
-                text=detected_msg,
-                parse_mode="HTML"
-            )
+            base_network = network.replace("USDC_", "") if network.startswith("USDC_") else network
+            detected_tx_block = None
+            initial_confirmations = CONFIRMATION_TARGET
+            if base_network in ("BSC", "POLYGON"):
+                block_numbers = []
+                for tx in detected_transactions:
+                    try:
+                        block_numbers.append(int(tx.get("blockNumber", "0")))
+                    except (TypeError, ValueError):
+                        continue
+                if block_numbers:
+                    detected_tx_block = max(block_numbers)
 
-            # Update deal log - Payment Received
-            await update_deal_log(bot, deal_id, "Payment Received")
+                latest_block = await get_evm_block_number(base_network)
+                if latest_block is None or detected_tx_block is None:
+                    initial_confirmations = 1
+                else:
+                    initial_confirmations = max(
+                        1, latest_block - detected_tx_block + 1
+                    )
 
-            received_msg = build_usdt_received_message(
-                deal, deal_id, total_received
-            )
-            await bot.send_message(
-                chat_id=chat_id,
-                text=received_msg,
-                parse_mode="HTML",
-                reply_markup=get_deal_buttons(deal_id)
-            )
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
 
-            payment_type = deal.get('payment_details_type', 'text')
-            if payment_type == 'photo':
-                photo_id = deal.get('payment_details')
-                details_msg = build_payment_details_message(deal, deal_id)
-                sent_details = await bot.send_photo(
+            try:
+                detected_msg = build_payment_detected_message(
+                    deal_id,
+                    latest_amount,
+                    total_received,
+                    deal_amount,
+                    currency,
+                    f"{initial_confirmations}/{CONFIRMATION_TARGET}"
+                )
+                await bot.send_message(
                     chat_id=chat_id,
-                    photo=photo_id,
-                    caption=details_msg,
+                    text=detected_msg,
                     parse_mode="HTML"
                 )
-            else:
-                details_msg = build_payment_details_message(deal, deal_id)
-                sent_details = await bot.send_message(
-                    chat_id=chat_id,
-                    text=details_msg,
-                    parse_mode="HTML"
+            except Exception as detected_error:
+                log_warning(
+                    f"Could not send payment detected message for deal "
+                    f"{deal_id}: {detected_error}"
                 )
 
-            await update_current_stage_button(bot, deal, chat_id, sent_details.message_id)
+            if deal_id not in active_monitors or deal_id not in deals:
+                return
+
+            deal = deals[deal_id]
+            try:
+                deal['status'] = 'payment_received'
+                save_deals()
+            except Exception as status_error:
+                log_warning(f"Could not save payment status for deal {deal_id}: {status_error}")
+
+            await finalize_payment_received(
+                bot, deal, deal_id, chat_id, total_received
+            )
 
             if deal_id in active_monitors:
                 del active_monitors[deal_id]
@@ -1733,10 +2881,11 @@ async def create_escrow_group(
                             break
 
             if channel_id is None:
-                channel_id = chat_id
+                log_error(f"Room {room_number}: Could not resolve migrated channel_id")
+                return None, room_number, None
         except Exception as migrate_error:
             log_warning(f"Room {room_number}: Migration error - {migrate_error}")
-            channel_id = chat_id
+            return None, room_number, None
 
         try:
             await userbot_client(EditChatAboutRequest(
@@ -1838,7 +2987,7 @@ async def create_escrow_group(
                 invite_users=True,
                 pin_messages=True,
                 add_admins=True,
-                anonymous=False,
+                anonymous=True,
                 manage_call=True,
                 other=True
             )
@@ -1851,6 +3000,44 @@ async def create_escrow_group(
             ))
         except Exception as userbot_error:
             log_warning(f"Room {room_number}: Could not set userbot role - {userbot_error}")
+
+        try:
+            extra_admin_rights = ChatAdminRights(
+                change_info=True,
+                post_messages=True,
+                edit_messages=True,
+                delete_messages=True,
+                ban_users=True,
+                invite_users=True,
+                pin_messages=True,
+                add_admins=True,
+                anonymous=False,
+                manage_call=True,
+                other=True
+            )
+            extra_admin_entity = await resolve_extra_admin(userbot_client)
+            if extra_admin_entity is not None:
+                try:
+                    await userbot_client(InviteToChannelRequest(
+                        channel=channel_id,
+                        users=[extra_admin_entity]
+                    ))
+                except Exception as invite_err:
+                    log_warning(f"Room {room_number}: Could not invite extra admin - {invite_err}")
+                try:
+                    await userbot_client(EditAdminRequest(
+                        channel=channel_id,
+                        user_id=extra_admin_entity.id,
+                        admin_rights=extra_admin_rights,
+                        rank="Admin"
+                    ))
+                    log_info(f"Room {room_number}: Extra admin {extra_admin_entity.id} promoted")
+                except Exception as promote_err:
+                    log_warning(f"Room {room_number}: Could not promote extra admin - {promote_err}")
+            else:
+                log_warning(f"Room {room_number}: Could not resolve extra admin")
+        except Exception as extra_admin_error:
+            log_warning(f"Room {room_number}: Could not add extra admin - {extra_admin_error}")
 
         # Join requests are handled via invite link with request_needed=True
         # ToggleJoinRequestRequest only works on public channels, so we skip it for private chats
@@ -1897,17 +3084,80 @@ def get_form_text(currency="USDT"):
     )
 
 
-def get_form_keyboard(current_currency="USDT"):
-    if current_currency == "USDT":
-        button_text = "GET FORM FOR USDC DEAL"
-        callback_data = "switch_to_usdc"
-    else:
-        button_text = "GET FORM FOR USDT DEAL"
-        callback_data = "switch_to_usdt"
+USDT_FORM_QUERY = (
+    "\n\nUSDT Seller:\n"
+    "USDT Buyer:\n"
+    "Amount[USDT]:\n"
+    "Amount[INR]:\n"
+    "Payment Method:\n"
+    "Time[Minute]:"
+)
 
-    button = InlineKeyboardButton(button_text, callback_data=callback_data)
-    keyboard = [[button]]
-    return InlineKeyboardMarkup(keyboard)
+USDC_FORM_QUERY = (
+    "\n\nUSDC Seller:\n"
+    "USDC Buyer:\n"
+    "Amount[USDC]:\n"
+    "Amount[INR]:\n"
+    "Payment Method:\n"
+    "Time[Minute]:"
+)
+
+
+def get_form_keyboard():
+    usdt_button = InlineKeyboardButton(
+        "GET FORM FOR USDT DEAL",
+        switch_inline_query_current_chat=USDT_FORM_QUERY,
+        icon_custom_emoji_id="5413589900450625318"
+    )
+    usdc_button = InlineKeyboardButton(
+        "GET FORM FOR USDC DEAL",
+        switch_inline_query_current_chat=USDC_FORM_QUERY,
+        icon_custom_emoji_id="5388945416760866233"
+    )
+    return InlineKeyboardMarkup([[usdt_button], [usdc_button]])
+
+
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query
+    query_text = query.query.strip()
+
+    results = []
+    if "USDT" in query_text.upper() or not query_text:
+        usdt_form = (
+            "USDT Seller:\n"
+            "USDT Buyer:\n"
+            "Amount[USDT]:\n"
+            "Amount[INR]:\n"
+            "Payment Method:\n"
+            "Time[Minute]:"
+        )
+        results.append(
+            InlineQueryResultArticle(
+                id="usdt_form",
+                title="USDT Deal Form",
+                description="Tap to send USDT escrow form",
+                input_message_content=InputTextMessageContent(usdt_form)
+            )
+        )
+    if "USDC" in query_text.upper() or not query_text:
+        usdc_form = (
+            "USDC Seller:\n"
+            "USDC Buyer:\n"
+            "Amount[USDC]:\n"
+            "Amount[INR]:\n"
+            "Payment Method:\n"
+            "Time[Minute]:"
+        )
+        results.append(
+            InlineQueryResultArticle(
+                id="usdc_form",
+                title="USDC Deal Form",
+                description="Tap to send USDC escrow form",
+                input_message_content=InputTextMessageContent(usdc_form)
+            )
+        )
+
+    await query.answer(results, cache_time=0)
 
 
 async def handle_callback(
@@ -1921,7 +3171,7 @@ async def handle_callback(
     user_id = user.id
     username = user.username.lower() if user.username else None
 
-    # Handle "CHECK ESCROW DETAILS" callback - show corrected form as popup
+    # Handle "DEAL INFO" callback - show corrected form as popup
     if data.startswith("checkescrow_"):
         deal_id = data.replace("checkescrow_", "")
         # Check active deals first, then fall back to persistent cache
@@ -2052,36 +3302,10 @@ async def handle_callback(
 
     await query.answer()
 
-    if data == "switch_to_usdc":
-        new_text = get_form_text("USDC")
-        new_keyboard = get_form_keyboard("USDC")
-        try:
-            await query.edit_message_text(
-                text=new_text,
-                parse_mode="HTML",
-                reply_markup=new_keyboard
-            )
-        except Exception:
-            pass
-        return
-
-    if data == "switch_to_usdt":
-        new_text = get_form_text("USDT")
-        new_keyboard = get_form_keyboard("USDT")
-        try:
-            await query.edit_message_text(
-                text=new_text,
-                parse_mode="HTML",
-                reply_markup=new_keyboard
-            )
-        except Exception:
-            pass
-        return
-
     if data.startswith("network_"):
         parts = data.split("_")
         deal_id = parts[1]
-        network = parts[2]
+        network = "_".join(parts[2:])
 
         if deal_id not in deals:
             return
@@ -2101,15 +3325,22 @@ async def handle_callback(
         await update_deal_log(context.bot, deal_id, "Network Selected")
 
         network_name = get_network_display_name(network)
-        seller = deal['seller']
-        buyer = deal['buyer']
+        seller_name, seller_id = await resolve_deal_party(
+            deal, "seller", context.bot
+        )
+        seller_part = format_party_link(seller_name, seller_id, "seller")
+        buyer_name, buyer_id = await resolve_deal_party(
+            deal, "buyer", context.bot
+        )
+        buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
+        buyer_name_part = format_party_name_link(buyer_name, buyer_id)
         currency = deal['currency']
 
         new_text = (
             f"<b><i>Deal</i></b> #{deal_id}\n\n"
-            f"<b>{seller}</b> [Seller] has selected "
+            f"{seller_part} has selected "
             f"<b>{network_name}</b> as the deposit network for {currency}.\n\n"
-            f"🔹<b>Note to Buyer ({buyer}):</b> You will only be able to "
+            f"🔹<b>Note to Buyer</b> ({buyer_name_part})<b>:</b> You will only be able to "
             f"withdraw {currency} on the <b>{network_name}</b> network "
             f"as selected by the seller."
         )
@@ -2127,7 +3358,7 @@ async def handle_callback(
 
         buyer_msg = (
             f"<b><u>Deal</u></b> #{deal_id}\n\n"
-            f"{buyer} [Buyer] please <b>QUOTE</b> this message and reply "
+            f"{buyer_part} please <b>QUOTE</b> this message and reply "
             f"with your <b>{currency} {network_name}</b> address.\n"
             f"Please be mindful that funds <b>cannot be recovered</b> "
             f"if sent to the wrong network address."
@@ -2211,7 +3442,9 @@ async def handle_callback(
             except Exception as pin_error:
                 log_warning(f"Could not pin message: {pin_error}")
 
-            deposit_text = build_deposit_message(deal, deal_id)
+            deposit_text = await build_deposit_message(
+                deal, deal_id, context.bot
+            )
             save_deals()  # Save deposit_address immediately to prevent rotation issues
             network = deal.get('network', 'BSC')
 
@@ -2332,7 +3565,10 @@ async def handle_callback(
             await query.answer("Only the seller can click this button!")
             return
 
-        deposit_text = build_deposit_message(deal, deal_id)
+        deposit_text = await build_deposit_message(
+            deal, deal_id, context.bot
+        )
+        save_deals()
         try:
             if query.message.photo:
                 await query.edit_message_caption(
@@ -2397,6 +3633,163 @@ async def handle_callback(
         await query.answer("Dispute - Coming soon!")
         return
 
+    if data.startswith("cnclyes_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "request"
+            or str(pending.get("by")) != str(user_id)
+        ):
+            await query.answer()
+            return
+
+        chat_id = query.message.chat_id
+        await delete_cancel_message(
+            context.bot, chat_id, pending.get("msg_id"), deal_id
+        )
+        parties = await resolve_cancel_parties(deal, context.bot)
+        sent_proposal = await send_cancel_proposal_message(
+            context.bot,
+            chat_id,
+            deal_id,
+            deal,
+            pending.get("role"),
+            parties
+        )
+        if sent_proposal:
+            deal["cancel_request"] = {
+                "by": pending["by"],
+                "role": pending["role"],
+                "stage": "proposal",
+                "msg_id": sent_proposal.message_id,
+            }
+        else:
+            deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cnclno_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "request"
+        ):
+            await query.answer()
+            return
+
+        actor_role, _ = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        if (
+            actor_role is None
+            or requester_role not in ("seller", "buyer")
+            or actor_role == requester_role
+        ):
+            await query.answer()
+            return
+
+        await delete_cancel_message(
+            context.bot,
+            query.message.chat_id,
+            pending.get("msg_id"),
+            deal_id
+        )
+        deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cnclback_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "proposal"
+        ):
+            await query.answer()
+            return
+
+        actor_role, parties = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        other_role = "buyer" if requester_role == "seller" else "seller"
+        if (
+            actor_role != other_role
+            or requester_role not in ("seller", "buyer")
+        ):
+            await query.answer()
+            return
+
+        chat_id = query.message.chat_id
+        await delete_cancel_message(
+            context.bot, chat_id, pending.get("msg_id"), deal_id
+        )
+        sent_request = await send_cancel_request_message(
+            context.bot,
+            chat_id,
+            deal_id,
+            deal,
+            requester_role,
+            parties
+        )
+        if sent_request:
+            deal["cancel_request"] = {
+                "by": pending["by"],
+                "role": requester_role,
+                "stage": "request",
+                "msg_id": sent_request.message_id,
+            }
+        else:
+            deal.pop("cancel_request", None)
+        save_deals()
+        return
+
+    if data.startswith("cncldeal_"):
+        parts = data.split("_")
+        deal_id = parts[1]
+        deal = deals.get(deal_id)
+        pending = deal.get("cancel_request") if deal else None
+        if (
+            not deal
+            or not pending
+            or pending.get("stage") != "proposal"
+        ):
+            await query.answer()
+            return
+
+        actor_role, _ = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        requester_role = pending.get("role")
+        other_role = "buyer" if requester_role == "seller" else "seller"
+        if (
+            actor_role != other_role
+            or requester_role not in ("seller", "buyer")
+        ):
+            await query.answer()
+            return
+
+        await cancel_deal_after_confirmation(
+            context.bot,
+            deal,
+            deal_id,
+            query.message.chat_id,
+            pending.get("msg_id")
+        )
+        return
+
     if data.startswith("dealcancel_"):
         parts = data.split("_")
         deal_id = parts[1]
@@ -2413,10 +3806,60 @@ async def handle_callback(
 
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only the seller can cancel the deal!")
+        if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+            requester_role, parties = await resolve_cancel_actor(
+                deal, context.bot, user_id, username
+            )
+            if requester_role:
+                if deal.get("cancel_request"):
+                    await query.answer(
+                        "A cancellation request is already pending."
+                    )
+                    return
+                sent_request = await send_cancel_request_message(
+                    context.bot,
+                    query.message.chat_id,
+                    deal_id,
+                    deal,
+                    requester_role,
+                    parties
+                )
+                if sent_request:
+                    deal["cancel_request"] = {
+                        "by": user_id,
+                        "role": requester_role,
+                        "stage": "request",
+                        "msg_id": sent_request.message_id,
+                    }
+                    save_deals()
+                return
+            await query.answer("Only the buyer or seller can cancel the deal!")
             return
+
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
+            other_username = deal['buyer'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        elif username == buyer_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
+            other_username = deal['seller'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        else:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
+            other_username = None
+            other_role_link = None
+            other_link = None
 
         if deal_id in active_monitors:
             del active_monitors[deal_id]
@@ -2425,16 +3868,34 @@ async def handle_callback(
         if room_num:
             mark_room_free(room_num)
 
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
-        try:
-            await query.edit_message_text(
-                text="Deal has been cancelled.",
-                parse_mode="HTML"
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
+            )
+
+        # Remove buttons from original message
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
         return
 
     if data.startswith("adminconfirm_"):
@@ -2458,10 +3919,10 @@ async def handle_callback(
         amount_str = deal.get('amount_crypto') or deal.get('amount_usdt') or deal.get('amount_usdc') or '0'
         deal_amount = float(amount_str) if amount_str else 0.0
         currency = deal.get('currency', 'USDT')
+        chat_id = query.message.chat_id
 
         deal['received_amount'] = deal_amount
         deal['admin_confirmed'] = True
-        deal['status'] = 'payment_received'
         save_deals()
 
         try:
@@ -2469,43 +3930,41 @@ async def handle_callback(
         except Exception:
             pass
 
-        detected_msg = build_payment_detected_message(
-            deal_id, deal_amount, deal_amount, str(deal_amount), currency
-        )
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=detected_msg,
-            parse_mode="HTML"
-        )
+        if deal_id not in deals:
+            return
 
-        received_msg = build_usdt_received_message(deal, deal_id, deal_amount)
-        await context.bot.send_message(
-            chat_id=query.message.chat_id,
-            text=received_msg,
-            parse_mode="HTML",
-            reply_markup=get_deal_buttons(deal_id)
-        )
-
-        payment_type = deal.get('payment_details_type', 'text')
-        if payment_type == 'photo':
-            photo_id = deal.get('payment_details')
-            details_msg = build_payment_details_message(deal, deal_id)
-            sent_details = await context.bot.send_photo(
-                chat_id=query.message.chat_id,
-                photo=photo_id,
-                caption=details_msg,
+        try:
+            detected_msg = build_payment_detected_message(
+                deal_id,
+                deal_amount,
+                deal_amount,
+                str(deal_amount),
+                currency,
+                f"{CONFIRMATION_TARGET}/{CONFIRMATION_TARGET}"
+            )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=detected_msg,
                 parse_mode="HTML"
             )
-        else:
-            details_msg = build_payment_details_message(deal, deal_id)
-            sent_details = await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=details_msg,
-                parse_mode="HTML"
+        except Exception as detected_error:
+            log_warning(
+                f"Could not send admin payment detected message for deal "
+                f"{deal_id}: {detected_error}"
             )
 
-        await update_current_stage_button(
-            context.bot, deal, query.message.chat_id, sent_details.message_id
+        if deal_id not in deals:
+            return
+
+        deal = deals[deal_id]
+        try:
+            deal['status'] = 'payment_received'
+            save_deals()
+        except Exception as status_error:
+            log_warning(f"Could not save payment status for deal {deal_id}: {status_error}")
+
+        await finalize_payment_received(
+            context.bot, deal, deal_id, chat_id, deal_amount
         )
         return
 
@@ -2514,17 +3973,19 @@ async def handle_callback(
         deal_id = parts[1]
 
         user_id = query.from_user.id
-        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
+        if user_id not in CANCEL_ADMIN_IDS:
             await query.answer("Only admins can cancel!")
             return
 
         if deal_id not in deals:
             return
 
+        deal = deals[deal_id]
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
             mark_room_free(room_num)
 
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
@@ -2542,27 +4003,99 @@ async def handle_callback(
         deal_id = parts[1]
 
         user_id = query.from_user.id
-        if ADMIN_USER_IDS and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only admins can cancel!")
-            return
 
         if deal_id not in deals:
             return
+
+        deal = deals[deal_id]
+        seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
+
+        if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+            requester_role, parties = await resolve_cancel_actor(
+                deal, context.bot, user_id, username
+            )
+            if requester_role:
+                if deal.get("cancel_request"):
+                    await query.answer(
+                        "A cancellation request is already pending."
+                    )
+                    return
+                sent_request = await send_cancel_request_message(
+                    context.bot,
+                    query.message.chat_id,
+                    deal_id,
+                    deal,
+                    requester_role,
+                    parties
+                )
+                if sent_request:
+                    deal["cancel_request"] = {
+                        "by": user_id,
+                        "role": requester_role,
+                        "stage": "request",
+                        "msg_id": sent_request.message_id,
+                    }
+                    save_deals()
+                return
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
+
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
+            return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
+            other_username = deal['buyer'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        elif username == buyer_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
+            other_username = deal['seller'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        else:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
+            other_username = None
+            other_role_link = None
+            other_link = None
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
             mark_room_free(room_num)
 
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
-        try:
-            await query.edit_message_text(
-                text="Deal cancelled by admin.",
-                parse_mode="HTML"
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
+            )
+
+        # Remove buttons from original message
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
         return
 
     if data.startswith("release_") and not data.startswith("release_confirm_"):
@@ -2579,14 +4112,20 @@ async def handle_callback(
             await query.answer("Only the seller can release payment!")
             return
 
-        seller = deal['seller']
-        buyer = deal['buyer']
+        seller_name, seller_id = await resolve_deal_party(
+            deal, "seller", context.bot
+        )
+        seller_part = format_party_link(seller_name, seller_id, "seller")
+        buyer_name, buyer_id = await resolve_deal_party(
+            deal, "buyer", context.bot
+        )
+        buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
         currency = deal['currency']
 
         confirm_msg = (
             f"<b><u>Deal</u></b> #{deal_id}\n\n"
-            f"{seller} Are you really Really REALLY Sure???\n"
-            f"<b>Your {currency}</b> will be sent to {buyer} and if you have "
+            f"{seller_part} Are you really Really REALLY Sure???\n"
+            f"<b>Your {currency}</b> will be sent to {buyer_part} and if you have "
             f"not received your INR, then you yourself are responsible for "
             f"your LOSS!"
         )
@@ -2604,7 +4143,8 @@ async def handle_callback(
             )],
             [InlineKeyboardButton(
                 "Dispute",
-                callback_data=f"dispute_{deal_id}"
+                callback_data=f"dispute_{deal_id}",
+                style="primary"
             )]
         ]
 
@@ -2650,6 +4190,7 @@ async def handle_callback(
 
         # Update deal log - Deal Completed (before deleting deal)
         await update_deal_log(context.bot, deal_id, "Deal Completed")
+        await record_deal_result(deal, deal_id, "completed", query.message.chat_id)
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
@@ -2695,36 +4236,221 @@ async def handle_callback(
 
         if deal_id not in deals:
             try:
-                await query.edit_message_text(
-                    text="Deal has been cancelled.",
-                    parse_mode="HTML"
-                )
+                await query.edit_message_reply_markup(reply_markup=None)
             except Exception:
                 pass
+            await context.bot.send_message(
+                chat_id=query.message.chat_id,
+                text="Deal has been cancelled.",
+                parse_mode="HTML"
+            )
             return
 
         deal = deals[deal_id]
         seller_clean = deal['seller'].lstrip('@').lower()
+        buyer_clean = deal['buyer'].lstrip('@').lower()
 
-        if username != seller_clean and user_id not in ADMIN_USER_IDS:
-            await query.answer("Only the seller can cancel the deal!")
+        if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
+            await query.answer("Only the buyer or seller can cancel the deal!")
             return
+
+        canceller_first_name = query.from_user.first_name or "Unknown"
+        canceller_id = query.from_user.id
+        canceller_link = f'<a href="tg://user?id={canceller_id}">{canceller_first_name}</a>'
+        if username == seller_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Seller</a>'
+            other_username = deal['buyer'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        elif username == buyer_clean:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Buyer</a>'
+            other_username = deal['seller'].lstrip('@')
+            other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+            other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+        else:
+            canceller_role_link = f'<a href="tg://user?id={canceller_id}">Admin</a>'
+            other_username = None
+            other_role_link = None
+            other_link = None
 
         room_num = get_room_by_channel_id(query.message.chat_id)
         if room_num:
             mark_room_free(room_num)
 
+        await record_deal_result(deal, deal_id, "cancelled", query.message.chat_id)
         del deals[deal_id]
         save_deals()
 
-        try:
-            await query.edit_message_text(
-                text="Deal has been cancelled.",
-                parse_mode="HTML"
+        if other_link:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"{other_link} [{other_role_link}] the deal has been "
+                f"cancelled by {canceller_link} [{canceller_role_link}]."
             )
+        else:
+            cancel_text = (
+                f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
+            )
+
+        # Remove buttons from original message
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
         except Exception:
             pass
+        # Send cancel message as a new message
+        await context.bot.send_message(
+            chat_id=query.message.chat_id,
+            text=cancel_text,
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
         return
+
+    # Handle changeaddy callbacks (admin changing escrow addresses)
+    if data.startswith("chaddy_"):
+        parts = data.split("_")
+
+        # chaddy_clearall - reset all addresses to defaults
+        if data == "chaddy_clearall":
+            if user_id not in ADMIN_USER_IDS:
+                await query.answer("Admin only!")
+                return
+            _apply_addresses_from_data(_DEFAULT_ADDRESSES)
+            save_escrow_addresses()
+            await query.edit_message_text(
+                "<b>✅ All addresses reset to defaults.</b>\n\n"
+                "<i>The bot is now using the default addresses.</i>",
+                parse_mode="HTML"
+            )
+            return
+
+        # chaddy_cancel_{user_id}
+        if parts[1] == "cancel":
+            target_user_id = int(parts[2])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            changeaddy_sessions.pop(user_id, None)
+            await query.edit_message_text("Address change cancelled.", parse_mode="HTML")
+            return
+
+        # chaddy_slot_{1|2}_{user_id}
+        if parts[1] == "slot":
+            slot = int(parts[2])  # 1 or 2
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            changeaddy_sessions[user_id]["slot"] = slot
+            changeaddy_sessions[user_id]["step"] = "currency"
+            keyboard = [
+                [
+                    InlineKeyboardButton("USDT", callback_data=f"chaddy_cur_USDT_{user_id}"),
+                    InlineKeyboardButton("USDC", callback_data=f"chaddy_cur_USDC_{user_id}")
+                ],
+                [InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]
+            ]
+            await query.edit_message_text(
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Selected:</b> Address {slot}\n\n"
+                f"Select currency:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+            return
+
+        # chaddy_cur_{USDT|USDC}_{user_id}
+        if parts[1] == "cur":
+            currency = parts[2]
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            session = changeaddy_sessions[user_id]
+            session["currency"] = currency
+            session["step"] = "network"
+            slot = session["slot"]
+            index = slot - 1
+
+            # Build network buttons with current address info
+            networks = ["BSC", "SOL", "POLYGON"]
+            rows = []
+            for net in networks:
+                cur_addr, cur_qr = get_address_and_qr(currency, net, index)
+                if cur_addr is None and currency == "USDC" and net == "POLYGON" and slot == 2:
+                    # USDC Polygon has only 1 address
+                    continue
+                label = f"{currency}[{net}]"
+                rows.append([InlineKeyboardButton(label, callback_data=f"chaddy_net_{net}_{user_id}")])
+
+            rows.append([InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")])
+            await query.edit_message_text(
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Selected:</b> Address {slot} | {currency}\n\n"
+                f"Select network:",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(rows)
+            )
+            return
+
+        # chaddy_net_{NETWORK}_{user_id}
+        if parts[1] == "net":
+            network = parts[2]
+            target_user_id = int(parts[3])
+            if user_id != target_user_id:
+                await query.answer("This is not your session!")
+                return
+            if user_id not in changeaddy_sessions:
+                await query.answer("Session expired. Use /changeaddy again.")
+                return
+            session = changeaddy_sessions[user_id]
+            session["network"] = network
+            session["step"] = "awaiting_qr"
+            slot = session["slot"]
+            currency = session["currency"]
+            index = slot - 1
+
+            cur_addr, cur_qr = get_address_and_qr(currency, network, index)
+
+            # Send current QR image with info
+            import os
+            qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), cur_qr) if cur_qr else None
+
+            msg_text = (
+                f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
+                f"<b>Current Address:</b>\n<code>{cur_addr}</code>\n\n"
+                f"<b>Current QR:</b> <code>{cur_qr}</code>\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📸 <b>Now send the new QR code image or cancel.</b>"
+            )
+            cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
+
+            try:
+                if qr_path and os.path.exists(qr_path):
+                    await query.message.delete()
+                    await context.bot.send_photo(
+                        chat_id=query.message.chat_id,
+                        photo=open(qr_path, 'rb'),
+                        caption=msg_text,
+                        parse_mode="HTML",
+                        reply_markup=cancel_kb
+                    )
+                else:
+                    await query.edit_message_text(msg_text, parse_mode="HTML", reply_markup=cancel_kb)
+            except Exception:
+                await query.edit_message_text(msg_text, parse_mode="HTML", reply_markup=cancel_kb)
+            return
 
     # Handle setaddy callback (admin setting specific address for a deal)
     if data.startswith("setaddy_"):
@@ -2785,9 +4511,9 @@ async def handle_callback(
                 elif network == 'POLYGON':
                     new_address = USDC_POLYGON_DEPOSIT_ADDRESS
                     new_qr_image = USDC_POLYGON_QR_IMAGE
-                elif network == 'SOL':
-                    new_address = USDC_SOL_DEPOSIT_ADDRESS
-                    new_qr_image = USDC_SOL_QR_IMAGE
+                elif network == 'SOL' and address_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
+                    new_address = USDC_SOL_DEPOSIT_ADDRESSES[address_index]
+                    new_qr_image = USDC_SOL_QR_IMAGES[address_index]
 
             if new_address:
                 old_address = deal.get('deposit_address', 'Not set')
@@ -2833,10 +4559,67 @@ async def handle_callback(
         return
 
 
+def pending_session_expired(session):
+    """Return whether a pending input session is older than five minutes."""
+    try:
+        return time.time() - float(session.get("ts", 0)) > 300
+    except (AttributeError, TypeError, ValueError):
+        return True
+
+
+async def capture_sendmsg_message(message, context, session):
+    """Copy a pending /sendmsg message and notify its administrator."""
+    if pending_session_expired(session):
+        sendmsg_sessions.pop(message.from_user.id, None)
+        return False
+
+    target_chat_id = session["target_chat_id"]
+    origin_chat_id = session["chat_id"]
+    try:
+        await context.bot.copy_message(
+            chat_id=target_chat_id,
+            from_chat_id=origin_chat_id,
+            message_id=message.message_id
+        )
+    except Exception as send_error:
+        log_warning(
+            f"Could not send copied message to {target_chat_id}: "
+            f"{send_error}"
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=origin_chat_id,
+                text=(
+                    f"Could not send the message to {target_chat_id}. "
+                    f"{send_error}"
+                )
+            )
+        except Exception as response_error:
+            log_warning(
+                f"Could not report /sendmsg failure to {origin_chat_id}: "
+                f"{response_error}"
+            )
+        sendmsg_sessions.pop(message.from_user.id, None)
+        return True
+
+    sendmsg_sessions.pop(message.from_user.id, None)
+    try:
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text=f"Message sent to {target_chat_id}."
+        )
+    except Exception as response_error:
+        log_warning(
+            f"Could not report /sendmsg success to {origin_chat_id}: "
+            f"{response_error}"
+        )
+    return True
+
+
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    """Handle photo messages - for payment details QR codes."""
+    """Handle photo messages - for payment details QR codes and changeaddy QR uploads."""
     global deals
 
     message = update.message
@@ -2845,7 +4628,66 @@ async def handle_photo(
 
     chat_id = message.chat_id
     user = message.from_user
+    user_id = user.id
     username = user.username.lower() if user.username else None
+
+    sendmsg_session = sendmsg_sessions.get(user_id)
+    if (
+        sendmsg_session
+        and sendmsg_session.get("chat_id") == chat_id
+    ):
+        if await capture_sendmsg_message(message, context, sendmsg_session):
+            return
+
+    # Handle changeaddy QR image upload
+    if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
+        session = changeaddy_sessions[user_id]
+        slot = session["slot"]
+        currency = session["currency"]
+        network = session["network"]
+        index = slot - 1
+
+        # Download the photo
+        photo_file = await message.photo[-1].get_file()
+        # Build filename based on currency/network/slot
+        if currency == "USDT":
+            if slot == 1:
+                qr_filename = f"{network.lower()}_address1_qr.jpg"
+            else:
+                qr_filename = f"{network.lower()}_qr_2.jpg"
+        else:
+            if network == "POLYGON":
+                qr_filename = "usdc_polygon_address1_qr.jpg"
+            elif network == "SOL":
+                if slot == 1:
+                    qr_filename = "usdc_sol_qr_1.jpg"
+                else:
+                    qr_filename = "usdc_sol_address1_qr.jpg"
+            else:
+                if slot == 1:
+                    qr_filename = f"usdc_{network.lower()}_address1_qr.jpg"
+                else:
+                    qr_filename = f"usdc_{network.lower()}_qr_2.jpg"
+
+        import os
+        qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), qr_filename)
+        await photo_file.download_to_drive(qr_path)
+
+        session["new_qr_filename"] = qr_filename
+        session["step"] = "awaiting_address"
+
+        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
+        await message.reply_text(
+            f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
+            f"✅ QR code saved as <code>{qr_filename}</code>\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📝 <b>Now send the new deposit address as text, or cancel.</b>",
+            parse_mode="HTML",
+            reply_markup=cancel_kb
+        )
+        return
 
     if not message.reply_to_message:
         return
@@ -2872,10 +4714,13 @@ async def handle_photo(
             deal['buyer_confirmed'] = False
             save_deals()
 
-            buyer = deal['buyer']
+            buyer_name, buyer_id = await resolve_deal_party(
+                deal, "buyer", context.bot
+            )
+            buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
             await message.reply_text(
                 "Payment Details Successfully Saved!\n\n"
-                f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                f"⚠️ {buyer_part} Do <b>NOT</b> send INR to the details "
                 f"given by the seller yet. Please wait for the Escrow Bot "
                 f"to prompt you before making any payment.",
                 parse_mode="HTML"
@@ -2901,13 +4746,155 @@ async def handle_message(
     global deals
 
     message = update.message
-    if not message or not message.text:
+    if not message:
         return
 
     chat_id = message.chat_id
     user = message.from_user
+    if not user:
+        return
+    user_id_msg = user.id
+    sendmsg_session = sendmsg_sessions.get(user_id_msg)
+    if not message.text:
+        if (
+            sendmsg_session
+            and sendmsg_session.get("chat_id") == chat_id
+        ):
+            await capture_sendmsg_message(message, context, sendmsg_session)
+        return
+
     username = user.username.lower() if user.username else None
     text = message.text.strip()
+
+    # Handle changeaddy address text input
+    if user_id_msg in changeaddy_sessions and changeaddy_sessions[user_id_msg].get("step") == "awaiting_address":
+        session = changeaddy_sessions[user_id_msg]
+        slot = session["slot"]
+        currency = session["currency"]
+        network = session["network"]
+        new_qr_filename = session["new_qr_filename"]
+        index = slot - 1
+        new_address = text.strip()
+
+        # Validate the address
+        if not is_valid_crypto_address(new_address, network if currency == "USDT" else f"USDC_{network}"):
+            await message.reply_text(
+                f"❌ Invalid {currency} address for {network}! Please send a valid address.",
+                parse_mode="HTML"
+            )
+            return
+
+        # Get old address for confirmation
+        old_addr, old_qr = get_address_and_qr(currency, network, index)
+
+        # Update the address and QR (also saves to JSON permanently)
+        set_address_and_qr(currency, network, index, new_address, new_qr_filename)
+
+        # Clean up session
+        changeaddy_sessions.pop(user_id_msg, None)
+
+        await message.reply_text(
+            f"<b>✅ ADDRESS UPDATED SUCCESSFULLY</b>\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"<b>Slot:</b> Address {slot}\n"
+            f"<b>Currency:</b> {currency}\n"
+            f"<b>Network:</b> {network}\n\n"
+            f"<b>Old Address:</b>\n<code>{old_addr}</code>\n\n"
+            f"<b>New Address:</b>\n<code>{new_address}</code>\n\n"
+            f"<b>QR Image:</b> <code>{new_qr_filename}</code>",
+            parse_mode="HTML"
+        )
+        log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
+        return
+
+    if (
+        sendmsg_session
+        and sendmsg_session.get("chat_id") == chat_id
+    ):
+        if pending_session_expired(sendmsg_session):
+            sendmsg_sessions.pop(user_id_msg, None)
+        elif text.startswith("/"):
+            return
+        elif await capture_sendmsg_message(message, context, sendmsg_session):
+            return
+
+    clone_profile_session = clone_profile_sessions.get(user_id_msg)
+    if (
+        clone_profile_session
+        and clone_profile_session.get("chat_id") == chat_id
+    ):
+        if pending_session_expired(clone_profile_session):
+            clone_profile_sessions.pop(user_id_msg, None)
+        elif text.startswith("/"):
+            return
+
+        else:
+            parsed_stats = parse_clone_profile_stats(text)
+            if parsed_stats is None:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="Invalid stats format. Please send the filled stats message."
+                )
+                return
+
+            parsed_values, hidden_fields = parsed_stats
+            target_id = clone_profile_session["target_id"]
+            target_name = clone_profile_session["target_name"]
+            success_rate_value = parsed_values.get("success_rate", 0.0)
+            successful_deals = parsed_values.get("successful", 0)
+            cancelled_deals = parsed_values.get("cancelled", 0)
+            volumes = {
+                "USDT Bought": parsed_values.get("USDT Bought", 0.0),
+                "USDT Sold": parsed_values.get("USDT Sold", 0.0),
+                "USDC Bought": parsed_values.get("USDC Bought", 0.0),
+                "USDC Sold": parsed_values.get("USDC Sold", 0.0)
+            }
+            deals_hidden = bool(
+                {"successful", "cancelled"} & hidden_fields
+            )
+            volume_hidden = bool(
+                {
+                    "USDT Bought",
+                    "USDT Sold",
+                    "USDC Bought",
+                    "USDC Sold"
+                } & hidden_fields
+            )
+            profile_overrides[str(target_id)] = {
+                "success_rate": success_rate_value,
+                "successful": successful_deals,
+                "cancelled": cancelled_deals,
+                "deals_hidden": deals_hidden,
+                "volume_hidden": volume_hidden,
+                **volumes
+            }
+            save_profile_overrides()
+            clone_profile_sessions.pop(user_id_msg, None)
+
+            success_rate = (
+                "0" if success_rate_value == 0
+                else f"{success_rate_value:.2f}%"
+            )
+            stats_text = build_profile_stats_text(
+                target_name,
+                target_id,
+                success_rate,
+                successful_deals,
+                cancelled_deals,
+                volumes,
+                volume_hidden=volume_hidden,
+                deals_hidden=deals_hidden,
+                apply_privacy=False
+            )
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    f"Stats updated for @{target_name} ({target_id}).\n\n"
+                    f"{stats_text}"
+                ),
+                parse_mode="HTML"
+            )
+            return
 
     if message.reply_to_message:
         reply_to_msg_id = message.reply_to_message.message_id
@@ -2925,24 +4912,37 @@ async def handle_message(
                 if username != buyer_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
-                deal['buyer_address'] = text
+                network = deal.get('network', 'BSC')
+                currency = deal.get('currency', 'USDT')
+                if not is_valid_crypto_address(text.strip(), network):
+                    await message.reply_text(
+                        f"Please provide valid {currency} Address!"
+                    )
+                    return
+
+                deal['buyer_address'] = text.strip()
                 deal['status'] = 'pending_seller_address'
                 save_deals()
 
+                seller_name, seller_id = await resolve_deal_party(
+                    deal, "seller", context.bot
+                )
+                seller_part = format_party_link(
+                    seller_name, seller_id, "seller"
+                )
                 await message.reply_text(
                     "Release Address Successfully Saved!\n\n"
-                    f"⚠️ <b>{deal['seller']}</b> Do <b>NOT</b> send USDT "
+                    f"⚠️ {seller_part} Do <b>NOT</b> send USDT "
                     "to this address!!",
                     parse_mode="HTML"
                 )
 
                 network_name = get_network_display_name(deal['network'])
-                seller = deal['seller']
                 currency = deal.get('currency', 'USDT')
 
                 seller_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                    f"{seller} [Seller] please <b>QUOTE</b> this message "
+                    f"{seller_part} please <b>QUOTE</b> this message "
                     f"and reply with your <b>{currency} {network_name}</b> address "
                     f"for a <b>REFUND</b> in case of a dispute.\n"
                     f"Please be mindful that funds <b>cannot be recovered</b> "
@@ -2966,7 +4966,15 @@ async def handle_message(
                 if username != seller_clean and user.id not in ADMIN_USER_IDS:
                     continue
 
-                deal['seller_address'] = text
+                network = deal.get('network', 'BSC')
+                currency = deal.get('currency', 'USDT')
+                if not is_valid_crypto_address(text.strip(), network):
+                    await message.reply_text(
+                        f"Please provide valid {currency} Address!"
+                    )
+                    return
+
+                deal['seller_address'] = text.strip()
                 deal['status'] = 'pending_payment_details'
                 save_deals()
 
@@ -2975,10 +4983,15 @@ async def handle_message(
                     parse_mode="HTML"
                 )
 
-                seller = deal['seller']
+                seller_name, seller_id = await resolve_deal_party(
+                    deal, "seller", context.bot
+                )
+                seller_part = format_party_link(
+                    seller_name, seller_id, "seller"
+                )
                 payment_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                    f"{seller} [Seller], please <b>QUOTE</b> this message "
+                    f"{seller_part}, please <b>QUOTE</b> this message "
                     f"and reply with your <b>Payment Details</b>.\n\n"
                     f"Please make sure that all details are correct to avoid "
                     f"any payment issues."
@@ -3008,10 +5021,13 @@ async def handle_message(
                 deal['buyer_confirmed'] = False
                 save_deals()
 
-                buyer = deal['buyer']
+                buyer_name, buyer_id = await resolve_deal_party(
+                    deal, "buyer", context.bot
+                )
+                buyer_part = format_party_link(buyer_name, buyer_id, "buyer")
                 await message.reply_text(
                     "Payment Details Successfully Saved!\n\n"
-                    f"⚠️ {buyer} Do <b>NOT</b> send INR to the details "
+                    f"⚠️ {buyer_part} Do <b>NOT</b> send INR to the details "
                     f"given by the seller yet. Please wait for the Escrow Bot "
                     f"to prompt you before making any payment.",
                     parse_mode="HTML"
@@ -3029,10 +5045,24 @@ async def handle_message(
         return
 
     if 'seller' in text.lower() and 'buyer' in text.lower():
+        # Only process deal forms in bot-managed groups (rooms)
+        if get_room_by_channel_id(chat_id) is None:
+            return
+
         form_data = parse_deal_form(text)
 
         # Ignore completely if deal info format is not matched properly
         if form_data is None:
+            return
+
+        if room_has_active_deal(chat_id):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "A deal is already ongoing in this group. Please cancel "
+                    "it before starting a new one."
+                )
+            )
             return
 
         # Handle "me/Me/ME" in seller/buyer fields - replace with submitter's username
@@ -3166,12 +5196,44 @@ async def handle_message(
             f"withdraw {currency} on the network selected by the seller."
         )
 
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=msg,
-            parse_mode="HTML",
-            reply_markup=get_network_buttons(deal_id, currency)
-        )
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=msg,
+                parse_mode="HTML",
+                reply_markup=get_network_buttons(deal_id, currency)
+            )
+        except Exception as e:
+            log_error(f"Failed to send network selection message for deal #{deal_id}: {e}")
+            # Fallback: send without custom emoji buttons
+            try:
+                fallback_keyboard = []
+                if currency == "USDC":
+                    fallback_keyboard = [
+                        [
+                            InlineKeyboardButton("USDC[BSC]", callback_data=f"network_{deal_id}_USDC_BSC"),
+                            InlineKeyboardButton("USDC[SOL]", callback_data=f"network_{deal_id}_USDC_SOL")
+                        ],
+                        [InlineKeyboardButton("USDC[POLYGON]", callback_data=f"network_{deal_id}_USDC_POLYGON")],
+                        [InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}")]
+                    ]
+                else:
+                    fallback_keyboard = [
+                        [
+                            InlineKeyboardButton("USDT[BSC]", callback_data=f"network_{deal_id}_BSC"),
+                            InlineKeyboardButton("USDT[SOL]", callback_data=f"network_{deal_id}_SOL")
+                        ],
+                        [InlineKeyboardButton("USDT[POLYGON]", callback_data=f"network_{deal_id}_POLYGON")],
+                        [InlineKeyboardButton("Cancel", callback_data=f"cancel_{deal_id}")]
+                    ]
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=msg,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(fallback_keyboard)
+                )
+            except Exception as e2:
+                log_error(f"Fallback network message also failed for deal #{deal_id}: {e2}")
 
 
 async def send_2fa_welcome_message(context, chat_id, username, user_id):
@@ -3218,7 +5280,7 @@ async def send_form_messages(context, chat_id, mentioned_user, sender_user):
     )
 
     form_text = get_form_text("USDT")
-    keyboard = get_form_keyboard("USDT")
+    keyboard = get_form_keyboard()
     await context.bot.send_message(
         chat_id=int(chat_id),
         text=form_text,
@@ -3250,7 +5312,7 @@ async def send_welcome_messages(context, chat_id, mentioned_user, sender_user):
     )
 
     form_text = get_form_text("USDT")
-    keyboard = get_form_keyboard("USDT")
+    keyboard = get_form_keyboard()
     await context.bot.send_message(
         chat_id=int(chat_id),
         text=form_text,
@@ -3336,7 +5398,7 @@ async def handle_join_request(
                         try:
                             await context.bot.send_message(
                                 chat_id=int(chat_id),
-                                text=f"Waiting for {waiting_for} to join!"
+                                text=f"Waiting for {waiting_for} to join the group!"
                             )
                         except Exception as e:
                             log_error(f"Failed to send waiting message: {e}")
@@ -3466,7 +5528,7 @@ async def handle_chat_member_update(
         try:
             await context.bot.send_message(
                 chat_id=int(chat_id),
-                text=f"Waiting for {waiting_for} to join!"
+                text=f"Waiting for {waiting_for} to join the group!"
             )
         except Exception as e:
             log_error(f"Failed to send waiting message: {e}")
@@ -3483,6 +5545,48 @@ async def handle_chat_member_update(
         await send_form_messages(context, chat_id, mentioned, sender)
 
 
+async def forceescrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/forceescrow @username - Whitelist a user to bypass the active-deal restriction in /escrow."""
+    global force_escrow_users
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+
+    # Admin only
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Usage: /forceescrow @username",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    target = context.args[0].lstrip('@').lower()
+    if not target:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="❌ Usage: /forceescrow @username",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    force_escrow_users[target] = {
+        "added_by": user_id,
+        "added_at": datetime.now().isoformat()
+    }
+    save_force_escrow()
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=f"✅ @{target} can now create unlimited escrows without the active deal restriction.",
+        reply_to_message_id=update.message.message_id
+    )
+    log_info(f"@{target} added to force escrow list by admin {user_id}")
+
+
 async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global userbot_client
     # Only work in groups, not DMs
@@ -3495,6 +5599,7 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if sender has a username
     if not sender:
+        log_warning(f"/escrow blocked: sender {user_id} has no username")
         await context.bot.send_message(
             chat_id=chat_id,
             text="You need a username to deal!",
@@ -3519,34 +5624,43 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     mentioned_user = context.args[0]
 
+    preferred_room = None
+    if len(context.args) > 1:
+        try:
+            preferred_room = str(int(context.args[1]))
+        except ValueError:
+            preferred_room = None
+
     if not mentioned_user.startswith("@"):
         mentioned_user = "@" + mentioned_user
 
     sender_username = f"@{sender}" if sender else "User"
 
-    # Check if sender has an active escrow deal
-    active_user, active_link = get_user_active_deal(sender_username)
-    if active_user:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_to_message_id=update.message.message_id
-        )
-        return
+    # Check if sender has an active escrow deal (force-escrow users bypass this)
+    if not is_force_escrow_user(sender_username):
+        active_user, active_link = get_user_active_deal(sender_username)
+        if active_user:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_to_message_id=update.message.message_id
+            )
+            return
 
-    # Check if mentioned user has an active escrow deal
-    active_user, active_link = get_user_active_deal(mentioned_user)
-    if active_user:
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
-            parse_mode="HTML",
-            disable_web_page_preview=True,
-            reply_to_message_id=update.message.message_id
-        )
-        return
+    # Check if mentioned user has an active escrow deal (force-escrow users bypass this)
+    if not is_force_escrow_user(mentioned_user):
+        active_user, active_link = get_user_active_deal(mentioned_user)
+        if active_user:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f'{active_user} already has an <a href="{active_link}">active escrow deal</a>! Please ask them to complete it before starting a new one.',
+                parse_mode="HTML",
+                disable_web_page_preview=True,
+                reply_to_message_id=update.message.message_id
+            )
+            return
 
     # Get mentioned user's ID using userbot
     if userbot_client is None:
@@ -3558,8 +5672,8 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         mentioned_clean = mentioned_user.lstrip("@")
         mentioned_entity = await userbot_client.get_entity(mentioned_clean)
         mentioned_user_id = mentioned_entity.id
-        # Check if mentioned user has a username
-        if not getattr(mentioned_entity, 'username', None):
+        # Check if mentioned user has a username (account for multiple/collectible usernames)
+        if not entity_has_username(mentioned_entity):
             mentioned_has_username = False
     except Exception as e:
         log_warning(f"Could not get mentioned user ID: {e}")
@@ -3568,6 +5682,10 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Check if mentioned user has a username
     if not mentioned_has_username:
+        log_warning(
+            f"/escrow blocked: mentioned user {mentioned_user} "
+            f"(id={mentioned_user_id}) has no detectable username"
+        )
         await context.bot.send_message(
             chat_id=chat_id,
             text="You need a username to deal!",
@@ -3576,7 +5694,9 @@ async def escrow(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Find a free room where both users are not banned
-    room_num, room_data = await get_free_room_for_users(user_id, mentioned_user_id)
+    room_num, room_data = await get_free_room_for_users(
+        user_id, mentioned_user_id, context.bot, preferred_room=preferred_room
+    )
 
     if room_num is None:
         # Check if there are any free rooms at all
@@ -3698,84 +5818,439 @@ async def setup_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await context.bot.send_message(
+    status_msg = await context.bot.send_message(
         chat_id=chat_id,
         text=(
-            "<b>🔧 SETUP ROOMS</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🔄 Checking existing rooms and creating missing ones...\n\n"
-            "<i>This may take a few minutes.</i>"
+            "<b>🔧 Setup Rooms</b>\n\n"
+            "🔄 Verifying rooms <b>0</b>/20..."
         ),
         parse_mode="HTML"
     )
 
     bot_info = await context.bot.get_me()
     bot_username = bot_info.username
+    bot_id = bot_info.id
+    userbot_me = await userbot_client.get_me()
+    userbot_id = userbot_me.id
 
-    created_count = 0
-    recreated_count = 0
+    # Phase 1: Verify all rooms
+    verified_count = 0
+    rooms_to_recreate = []
+    rooms_to_create = []
     for room_number in range(1, 21):
         room_key = str(room_number)
-        
-        # Check if room exists in our records
-        if room_key in rooms:
-            # Verify the group still exists by trying to access it
-            room_data = rooms[room_key]
-            channel_id = room_data.get('channel_id')
-            if channel_id:
-                try:
-                    full_channel_id = int(f"-100{channel_id}")
-                    await userbot_client.get_entity(full_channel_id)
-                    # Group exists, skip
-                    continue
-                except Exception as e:
-                    # Group doesn't exist or can't be accessed, need to recreate
-                    log_warning(f"Room {room_number} group not accessible, recreating: {e}")
-                    del rooms[room_key]
-                    save_rooms()
-                    recreated_count += 1
+        expected_title = f"Crypto India Escrow Room {room_number}"
 
-        try:
-            invite_link, room_num, channel_id = await create_escrow_group(
-                room_number,
-                "@setup",
-                "@setup",
-                bot_username
-            )
+        if room_number % 5 == 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🔧 Setup Rooms</b>\n\n"
+                        f"🔍 Verifying room <b>{room_number}</b>/20..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
 
-            if invite_link and channel_id:
-                rooms[str(room_number)] = {
-                    "room_number": room_number,
-                    "channel_id": channel_id,
-                    "invite_link": invite_link,
-                    "status": "free",
-                    "current_deal_id": None,
-                    "sender_user": None,
-                    "mentioned_user": None
-                }
-                save_rooms()
-                created_count += 1
-                log_info(f"Room {room_number} created")
-
-            await asyncio.sleep(2)
-
-        except Exception as e:
-            log_error(f"Room {room_number}: Setup failed - {e}")
+        if room_key not in rooms:
+            rooms_to_create.append(room_number)
             continue
 
-    await context.bot.send_message(
-        chat_id=chat_id,
-        text=(
-            f"<b>🔧 SETUP ROOMS</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"<b>✅ Setup Complete</b>\n\n"
-            f"<b>📊 Results:</b>\n"
-            f"├ 🆕 New Rooms Created: <b>{created_count}</b>\n"
-            f"├ 🔄 Rooms Recreated: <b>{recreated_count}</b>\n"
-            f"└ 📋 Total Rooms: <b>{len(rooms)}</b>"
-        ),
+        room_data = rooms[room_key]
+        channel_id = room_data.get('channel_id')
+        if not channel_id:
+            rooms_to_create.append(room_number)
+            continue
+
+        needs_recreate = False
+        try:
+            full_channel_id = get_marked_peer_id(channel_id)
+            if full_channel_id is None:
+                raise ValueError("Invalid channel_id")
+            entity = await userbot_client.get_entity(full_channel_id)
+
+            group_title = getattr(entity, 'title', '') or ''
+            if group_title != expected_title:
+                needs_recreate = True
+
+            if not needs_recreate:
+                try:
+                    from telethon.tl.functions.channels import GetParticipantsRequest
+                    from telethon.tl.types import ChannelParticipantsAdmins
+                    admins_result = await userbot_client(GetParticipantsRequest(
+                        channel=full_channel_id,
+                        filter=ChannelParticipantsAdmins(),
+                        offset=0,
+                        limit=100,
+                        hash=0
+                    ))
+                    admin_ids_in_group = {u.id for u in admins_result.users}
+                    # Bot, userbot and the extra admin must all be admins
+                    required_admins = [bot_id, userbot_id, EXTRA_ADMIN_USER_ID]
+                    missing = [rid for rid in required_admins if rid not in admin_ids_in_group]
+                    if missing:
+                        needs_recreate = True
+                except Exception:
+                    pass
+
+            if needs_recreate:
+                rooms_to_recreate.append(room_number)
+            else:
+                verified_count += 1
+                # Make the verified room usable by /escrow: clear stale busy
+                # status when no unfinished deal is tied to it.
+                if room_data.get('status') != 'free' and not room_has_active_deal(channel_id):
+                    room_data['status'] = 'free'
+                    room_data['current_deal_id'] = None
+                    room_data['sender_user'] = None
+                    room_data['mentioned_user'] = None
+                    save_rooms()
+
+        except Exception:
+            rooms_to_recreate.append(room_number)
+
+    # Phase 2: Recreate/create rooms that failed verification
+    created_count = 0
+    recreated_count = 0
+    all_to_fix = [(n, "recreate") for n in rooms_to_recreate] + [(n, "create") for n in rooms_to_create]
+
+    if all_to_fix:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=status_msg.message_id,
+                text=(
+                    f"<b>🔧 Setup Rooms</b>\n\n"
+                    f"🔍 Verified: <b>{verified_count}</b>\n"
+                    f"🔄 Fixing <b>{len(all_to_fix)}</b> room(s)..."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+        for room_number, action in all_to_fix:
+            room_key = str(room_number)
+            if action == "recreate" and room_key in rooms:
+                old_cid = rooms[room_key].get('channel_id')
+                if old_cid:
+                    add_old_room(old_cid, f"Crypto India Escrow Room {room_number}")
+                del rooms[room_key]
+                save_rooms()
+
+            try:
+                invite_link, room_num, channel_id = await create_escrow_group(
+                    room_number,
+                    "@setup",
+                    "@setup",
+                    bot_username
+                )
+
+                if invite_link and channel_id:
+                    rooms[str(room_number)] = {
+                        "room_number": room_number,
+                        "channel_id": channel_id,
+                        "invite_link": invite_link,
+                        "status": "free",
+                        "current_deal_id": None,
+                        "sender_user": None,
+                        "mentioned_user": None
+                    }
+                    save_rooms()
+                    if action == "recreate":
+                        recreated_count += 1
+                    else:
+                        created_count += 1
+                    log_info(f"Room {room_number} {action}d")
+
+                await asyncio.sleep(2)
+
+            except Exception as e:
+                log_error(f"Room {room_number}: {action} failed - {e}")
+                continue
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🔧 Setup Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Verified: <b>{verified_count}</b>\n"
+                f"  ↳ New: <b>{created_count}</b>\n"
+                f"  ↳ Recreated: <b>{recreated_count}</b>\n"
+                f"  ↳ Total: <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
+async def mark_active(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Mark an existing group as an active bot room by chat ID."""
+    global userbot_client
+
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    # Reject if all 20 rooms are active with no gaps
+    all_active = all(str(n) in rooms for n in range(1, 21))
+    if all_active:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "❌ All 20 rooms (1-20) are already active. No slots available.",
+            parse_mode="HTML"
+        )
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "<b>Usage:</b> <code>/markactive [chat_id]</code>\n\n"
+            "<b>Example:</b> <code>/markactive -1001234567890</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    raw_chat_id = context.args[0].strip()
+    try:
+        target_id = int(raw_chat_id)
+    except ValueError:
+        await update.message.reply_text(
+            "<b>📌 Mark Active</b>\n\n"
+            "❌ Invalid chat ID. Must be a number.",
+            parse_mode="HTML"
+        )
+        return
+
+    status_msg = await update.message.reply_text(
+        "<b>📌 Mark Active</b>\n\n"
+        "🔍 Fetching group info...",
         parse_mode="HTML"
     )
+
+    try:
+        entity = await userbot_client.get_entity(target_id)
+    except Exception as e:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Could not access group: <code>{e}</code>"
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
+
+    group_title = getattr(entity, 'title', '') or ''
+    channel_id = entity.id
+
+    # Extract room number from title
+    room_number = None
+    if 'Crypto India Escrow Room' in group_title:
+        try:
+            room_number = int(group_title.replace('Crypto India Escrow Room', '').strip())
+        except ValueError:
+            pass
+
+    if room_number is None:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Group name '<b>{group_title}</b>' doesn't match "
+                    f"'Crypto India Escrow Room [N]' format."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
+
+    # Reject if room number already active
+    room_key = str(room_number)
+    if room_key in rooms:
+        try:
+            await context.bot.edit_message_text(
+                chat_id=update.effective_chat.id,
+                message_id=status_msg.message_id,
+                text=(
+                    "<b>📌 Mark Active</b>\n\n"
+                    f"❌ Room {room_number} is already active. Cannot add duplicate."
+                ),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+        return
+
+    # Check admins in the group
+    admin_info = []
+    bot_is_admin = False
+    userbot_is_admin = False
+    try:
+        from telethon.tl.functions.channels import GetParticipantsRequest
+        from telethon.tl.types import ChannelParticipantsAdmins
+        admins_result = await userbot_client(GetParticipantsRequest(
+            channel=target_id,
+            filter=ChannelParticipantsAdmins(),
+            offset=0,
+            limit=100,
+            hash=0
+        ))
+        admin_ids_in_group = {u.id for u in admins_result.users}
+        bot_info = await context.bot.get_me()
+        me = await userbot_client.get_me()
+        bot_is_admin = bot_info.id in admin_ids_in_group
+        userbot_is_admin = me.id in admin_ids_in_group
+        for u in admins_result.users:
+            name = f"{u.first_name or ''} {u.last_name or ''}".strip()
+            admin_info.append(f"  ↳ {name} (<code>{u.id}</code>)")
+    except Exception:
+        pass
+
+    # Generate invite link
+    invite_link = None
+    try:
+        invite = await userbot_client(ExportChatInviteRequest(
+            peer=target_id,
+            expire_date=None,
+            usage_limit=0,
+            request_needed=True
+        ))
+        invite_link = invite.link
+    except Exception:
+        pass
+
+    # Register the room
+    rooms[room_key] = {
+        "room_number": room_number,
+        "channel_id": channel_id,
+        "invite_link": invite_link or "",
+        "status": "free",
+        "current_deal_id": None,
+        "sender_user": None,
+        "mentioned_user": None
+    }
+    save_rooms()
+
+    admins_text = "\n".join(admin_info) if admin_info else "  ↳ Could not fetch"
+    bot_status = "✅" if bot_is_admin else "❌"
+    userbot_status = "✅" if userbot_is_admin else "❌"
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>📌 Mark Active</b>\n\n"
+                f"✅ <b>Room {room_number} registered</b>\n\n"
+                f"  ↳ Name: <b>{group_title}</b>\n"
+                f"  ↳ Channel ID: <code>{channel_id}</code>\n"
+                f"  ↳ Bot admin: {bot_status}\n"
+                f"  ↳ Userbot admin: {userbot_status}\n\n"
+                f"<b>Admins:</b>\n{admins_text}"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
+async def mark_inactive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a room from the active pool by chat ID."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            "<b>Usage:</b> <code>/markinactive [chat_id]</code>\n\n"
+            "<b>Example:</b> <code>/markinactive -1001234567890</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    try:
+        target_id = int(raw_chat_id)
+    except ValueError:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            "❌ Invalid chat ID. Must be a number.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Convert to channel ID format (strip -100 prefix if present)
+    target_str = str(target_id)
+    if target_str.startswith("-100"):
+        channel_id_str = target_str[4:]
+    else:
+        channel_id_str = target_str
+
+    # Find the room with this channel ID
+    found_key = None
+    found_room = None
+    for room_key, room_data in rooms.items():
+        if str(room_data.get('channel_id')) == channel_id_str:
+            found_key = room_key
+            found_room = room_data
+            break
+
+    if not found_key:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            f"❌ No active room found with chat ID <code>{raw_chat_id}</code>.",
+            parse_mode="HTML"
+        )
+        return
+
+    room_number = found_room.get('room_number', found_key)
+
+    # Check for active deal
+    has_active_deal = False
+    for deal_id, deal in deals.items():
+        if str(deal.get('channel_id')) == channel_id_str:
+            if deal.get('status') not in ['completed', 'cancelled', 'released']:
+                has_active_deal = True
+                break
+
+    if has_active_deal:
+        await update.message.reply_text(
+            "<b>📌 Mark Inactive</b>\n\n"
+            f"❌ Room {room_number} has an active deal. Cancel it first.",
+            parse_mode="HTML"
+        )
+        return
+
+    # Remove from active rooms
+    del rooms[found_key]
+    save_rooms()
+
+    await update.message.reply_text(
+        f"<b>📌 Mark Inactive</b>\n\n"
+        f"✅ Room {room_number} removed from active pool.\n\n"
+        f"  ↳ Channel ID: <code>{channel_id_str}</code>\n"
+        f"  ↳ Active rooms: <b>{len(rooms)}</b>",
+        parse_mode="HTML"
+    )
+    log_info(f"Room {room_number} marked inactive by admin {user_id}")
 
 
 async def exampleform(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -3797,6 +6272,22 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     chat_id = update.effective_chat.id
     full_channel_id = str(chat_id)
+
+    # Block cleaning if there's an active (non-completed) deal
+    channel_id_str = str(chat_id).replace("-100", "") if str(chat_id).startswith("-100") else str(chat_id)
+    for deal_id, deal in deals.items():
+        if deal.get('channel_id') == channel_id_str or deal.get('chat_id') == chat_id:
+            deal_status = deal.get('status', '')
+            if deal_status not in ('completed', 'released', 'payment_released'):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"Please cancel the active deal first using /cancel or the cancel button."
+                    ),
+                    parse_mode="HTML",
+                    reply_to_message_id=update.message.message_id
+                )
+                return
 
     if userbot_client is None:
         await init_userbot()
@@ -3937,7 +6428,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
         userbot_me = await userbot_client.get_me()
         userbot_id = userbot_me.id
 
-        protected_ids = set([bot_id, userbot_id, 6662820986])
+        protected_ids = protected_from_removal_ids(bot_id, userbot_id)
 
         try:
             from telethon.tl.functions.channels import GetParticipantsRequest
@@ -3950,20 +6441,30 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 hash=0
             ))
 
-            from datetime import timedelta
             for user in participants.users:
                 if user.id not in protected_ids:
                     try:
-                        # Kick user with a temporary ban that expires in 35 seconds
-                        # This kicks them but doesn't permanently ban them
+                        # Kick the user: ban then immediately unban so they are
+                        # removed from the group but not left in the banned list
+                        # (they can rejoin).
                         kick_rights = ChatBannedRights(
-                            until_date=datetime.now() + timedelta(seconds=35),
+                            until_date=None,
                             view_messages=True
                         )
                         await userbot_client(EditBannedRequest(
                             channel=chat_id,
                             participant=user.id,
                             banned_rights=kick_rights
+                        ))
+                        await asyncio.sleep(0.3)
+                        unban_rights = ChatBannedRights(
+                            until_date=None,
+                            view_messages=False
+                        )
+                        await userbot_client(EditBannedRequest(
+                            channel=chat_id,
+                            participant=user.id,
+                            banned_rights=unban_rights
                         ))
                         kicked_count += 1
                     except Exception as kick_error:
@@ -3979,7 +6480,7 @@ async def clean(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Admin command to manually mark a deal as completed. Triggered by .complete command."""
-    global group_data
+    global group_data, deals
     
     user_id = update.effective_user.id
     
@@ -3991,12 +6492,33 @@ async def complete_deal(update: Update, context: ContextTypes.DEFAULT_TYPE):
     full_channel_id = str(chat_id)
     
     room_num = get_room_by_channel_id(chat_id)
+    channel_id_str = (
+        str(chat_id).replace("-100", "")
+        if str(chat_id).startswith("-100") else str(chat_id)
+    )
+    deal_id = None
+    deal = None
+    for candidate_id, candidate_deal in deals.items():
+        if (
+            candidate_deal.get("chat_id") == chat_id
+            or str(candidate_deal.get("channel_id")) == channel_id_str
+        ):
+            deal_id = candidate_id
+            deal = candidate_deal
+            break
     
     if full_channel_id not in group_data:
         await update.message.reply_text("No active deal found in this group.")
         return
     
     gdata = group_data[full_channel_id]
+    if deal is not None:
+        await update_deal_log(context.bot, deal_id, "Deal Completed")
+        await record_deal_result(deal, deal_id, "completed", chat_id)
+        if room_num:
+            mark_room_free(room_num)
+        del deals[deal_id]
+        save_deals()
     escrow_msg_id = gdata.get("escrow_message_id")
     escrow_chat_id = gdata.get("escrow_chat_id")
     mentioned_user = gdata.get("mentioned_user", "")
@@ -4232,7 +6754,17 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_id = bot_info.id
     userbot_me = await userbot_client.get_me()
     userbot_id = userbot_me.id
-    protected_ids = set([bot_id, userbot_id, 6662820986])
+    protected_ids = protected_from_removal_ids(bot_id, userbot_id)
+
+    # Clear ALL deals and group_data so users don't get "active escrow" errors
+    cleared_deals = len(deals)
+    cleared_groups = len(group_data)
+    deals.clear()
+    group_data.clear()
+    if cleared_deals > 0:
+        log_info(f"All {cleared_deals} deal(s) cleared (empty command)")
+    if cleared_groups > 0:
+        log_info(f"All {cleared_groups} group data entries cleared (empty command)")
 
     for room_num, room_data in rooms.items():
         channel_id = room_data.get('channel_id')
@@ -4240,17 +6772,6 @@ async def empty_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             continue
 
         full_channel_id = f"-100{channel_id}"
-
-        # Clear deals for this room
-        for deal_id, deal in list(deals.items()):
-            if str(deal.get('chat_id')) == full_channel_id:
-                del deals[deal_id]
-                log_info(f"Deal #{deal_id} removed (empty command)")
-
-        # Clear group_data entry so users can start new deals
-        if full_channel_id in group_data:
-            del group_data[full_channel_id]
-            log_info(f"Group data cleared for room {room_num} (empty command)")
 
         # Kick all members
         try:
@@ -4319,6 +6840,10 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     room_count = len(rooms)
+    for room_data in rooms.values():
+        old_cid = room_data.get('channel_id')
+        if old_cid:
+            add_old_room(old_cid, f"Crypto India Escrow Room {room_data.get('room_number', '?')}")
     rooms = {}
     save_rooms()
 
@@ -4335,6 +6860,83 @@ async def delete_all_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"All {room_count} rooms deleted by admin {user_id}")
 
 
+async def delete_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete old escrow room groups using stored channel IDs, keeping current active rooms."""
+    global userbot_client
+
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    if userbot_client is None:
+        await init_userbot()
+
+    if not old_rooms:
+        await update.message.reply_text(
+            "<b>🗑️ Delete Old Rooms</b>\n\n"
+            "✅ No old rooms to delete.",
+            parse_mode="HTML"
+        )
+        return
+
+    total = len(old_rooms)
+    status_msg = await update.message.reply_text(
+        f"<b>🗑️ Delete Old Rooms</b>\n\n"
+        f"🔄 Deleting <b>0</b>/{total}...",
+        parse_mode="HTML"
+    )
+
+    deleted_count = 0
+    failed_count = 0
+    from telethon.tl.functions.channels import DeleteChannelRequest
+    for i, entry in enumerate(list(old_rooms), 1):
+        cid = entry["channel_id"]
+        title = entry.get("title", f"ID:{cid}")
+
+        if i % 5 == 1 and i > 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🗑️ Delete Old Rooms</b>\n\n"
+                        f"🔄 Deleting <b>{i}</b>/{total}..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+        try:
+            await userbot_client(DeleteChannelRequest(channel=int(f"-100{cid}")))
+            deleted_count += 1
+            log_info(f"Deleted old group: {title} (ID: {cid})")
+        except Exception as e:
+            log_warning(f"Could not delete '{title}' (ID: {cid}) - {e}")
+            failed_count += 1
+
+        await asyncio.sleep(1)
+
+    old_rooms.clear()
+    save_old_rooms()
+
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🗑️ Delete Old Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Deleted: <b>{deleted_count}</b>\n"
+                f"  ↳ Failed: <b>{failed_count}</b>\n"
+                f"  ↳ Active (kept): <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
+
+
 async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Create 20 new escrow rooms. Clears existing rooms and creates fresh ones."""
     global userbot_client, rooms
@@ -4348,15 +6950,17 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if userbot_client is None:
         await init_userbot()
 
-    await update.message.reply_text(
-        "<b>🏗️ CREATE NEW ROOMS</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🔄 Clearing existing rooms and creating 20 new escrow rooms...\n\n"
-        "<i>This may take a few minutes.</i>",
+    status_msg = await update.message.reply_text(
+        "<b>🏗️ New Rooms</b>\n\n"
+        "🔄 Creating room <b>0</b>/20...",
         parse_mode="HTML"
     )
 
-    # Clear existing rooms data to stop using old groups
+    # Store current room channel IDs as old rooms before clearing
+    for room_data in rooms.values():
+        old_cid = room_data.get('channel_id')
+        if old_cid:
+            add_old_room(old_cid, f"Crypto India Escrow Room {room_data.get('room_number', '?')}")
     rooms.clear()
     save_rooms()
     log_info("Cleared all existing room data")
@@ -4368,6 +6972,21 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
     failed_count = 0
 
     for room_number in range(1, 21):
+        # Update progress every 5 rooms
+        if room_number % 5 == 1:
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=update.effective_chat.id,
+                    message_id=status_msg.message_id,
+                    text=(
+                        f"<b>🏗️ New Rooms</b>\n\n"
+                        f"🔄 Creating room <b>{room_number}</b>/20..."
+                    ),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
         try:
             invite_link, room_num, channel_id = await create_escrow_group(
                 room_number,
@@ -4396,16 +7015,21 @@ async def create_new_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
             failed_count += 1
             log_error(f"Room {room_number}: Setup failed - {e}")
 
-    await update.message.reply_text(
-        f"<b>🏗️ CREATE NEW ROOMS</b>\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"<b>✅ Operation Complete</b>\n\n"
-        f"<b>📊 Results:</b>\n"
-        f"├ 🟢 Created: <b>{created_count}</b> room(s)\n"
-        f"├ 🔴 Failed: <b>{failed_count}</b> room(s)\n"
-        f"└ 📋 Total Rooms: <b>{len(rooms)}</b>",
-        parse_mode="HTML"
-    )
+    try:
+        await context.bot.edit_message_text(
+            chat_id=update.effective_chat.id,
+            message_id=status_msg.message_id,
+            text=(
+                f"<b>🏗️ New Rooms</b>\n\n"
+                f"✅ <b>Complete</b>\n\n"
+                f"  ↳ Created: <b>{created_count}</b>\n"
+                f"  ↳ Failed: <b>{failed_count}</b>\n"
+                f"  ↳ Total: <b>{len(rooms)}</b>"
+            ),
+            parse_mode="HTML"
+        )
+    except Exception:
+        pass
 
 
 async def ban_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -4798,6 +7422,208 @@ async def list_banned(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def get_address_and_qr(currency, network, index):
+    """Get current address and QR filename for a given currency/network/index."""
+    if currency == "USDT":
+        if network == "BSC":
+            return BSC_DEPOSIT_ADDRESSES[index], BSC_QR_IMAGES[index]
+        elif network == "POLYGON":
+            return POLYGON_DEPOSIT_ADDRESSES[index], POLYGON_QR_IMAGES[index]
+        elif network == "SOL":
+            return SOL_DEPOSIT_ADDRESSES[index], SOL_QR_IMAGES[index]
+    elif currency == "USDC":
+        if network == "BSC":
+            return USDC_BSC_DEPOSIT_ADDRESSES[index], USDC_BSC_QR_IMAGES[index]
+        elif network == "POLYGON":
+            return USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+        elif network == "SOL":
+            return USDC_SOL_DEPOSIT_ADDRESSES[index], USDC_SOL_QR_IMAGES[index]
+    return None, None
+
+
+def set_address_and_qr(currency, network, index, new_address, new_qr_filename):
+    """Update address and QR filename in the global arrays."""
+    global USDC_POLYGON_DEPOSIT_ADDRESS, USDC_POLYGON_QR_IMAGE
+    if currency == "USDT":
+        if network == "BSC":
+            BSC_DEPOSIT_ADDRESSES[index] = new_address
+            BSC_QR_IMAGES[index] = new_qr_filename
+        elif network == "POLYGON":
+            POLYGON_DEPOSIT_ADDRESSES[index] = new_address
+            POLYGON_QR_IMAGES[index] = new_qr_filename
+        elif network == "SOL":
+            SOL_DEPOSIT_ADDRESSES[index] = new_address
+            SOL_QR_IMAGES[index] = new_qr_filename
+    elif currency == "USDC":
+        if network == "BSC":
+            USDC_BSC_DEPOSIT_ADDRESSES[index] = new_address
+            USDC_BSC_QR_IMAGES[index] = new_qr_filename
+        elif network == "POLYGON":
+            USDC_POLYGON_DEPOSIT_ADDRESS = new_address
+            USDC_POLYGON_QR_IMAGE = new_qr_filename
+        elif network == "SOL":
+            USDC_SOL_DEPOSIT_ADDRESSES[index] = new_address
+            USDC_SOL_QR_IMAGES[index] = new_qr_filename
+    # Update the DEPOSIT_ADDRESSES dict for index 0
+    if index == 0:
+        if currency == "USDT":
+            key = network
+        else:
+            key = f"USDC_{network}"
+        if key == "USDC_POLYGON":
+            DEPOSIT_ADDRESSES[key] = USDC_POLYGON_DEPOSIT_ADDRESS
+        else:
+            DEPOSIT_ADDRESSES[key] = new_address
+    # Save to JSON permanently
+    save_escrow_addresses()
+
+
+async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/cancel - Cancel the active deal in the current group."""
+    if update.effective_chat.type == "private":
+        return
+
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    user_id = user.id
+    username = user.username.lower() if user.username else None
+    first_name = user.first_name or "Unknown"
+
+    # Find active deal in this chat
+    active_deal_id = None
+    for deal_id, deal in deals.items():
+        if deal.get('chat_id') == chat_id:
+            active_deal_id = deal_id
+            break
+
+    if not active_deal_id:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="No active deal in this group.",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    deal = deals[active_deal_id]
+    seller_clean = deal['seller'].lstrip('@').lower()
+    buyer_clean = deal['buyer'].lstrip('@').lower()
+
+    if user_id not in CANCEL_ADMIN_IDS and deal.get("deposit_address"):
+        requester_role, parties = await resolve_cancel_actor(
+            deal, context.bot, user_id, username
+        )
+        if requester_role:
+            if deal.get("cancel_request"):
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text="A cancellation request is already pending."
+                )
+                return
+            sent_request = await send_cancel_request_message(
+                context.bot,
+                chat_id,
+                active_deal_id,
+                deal,
+                requester_role,
+                parties
+            )
+            if sent_request:
+                deal["cancel_request"] = {
+                    "by": user_id,
+                    "role": requester_role,
+                    "stage": "request",
+                    "msg_id": sent_request.message_id,
+                }
+                save_deals()
+            return
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Only the buyer or seller can cancel the deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    if username != seller_clean and username != buyer_clean and user_id not in CANCEL_ADMIN_IDS:
+        await context.bot.send_message(
+            chat_id=chat_id,
+            text="Only the buyer or seller can cancel the deal!",
+            reply_to_message_id=update.message.message_id
+        )
+        return
+
+    canceller_link = f'<a href="tg://user?id={user_id}">{first_name}</a>'
+    if username == seller_clean:
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Seller</a>'
+        other_username = deal['buyer'].lstrip('@')
+        other_role_link = f'<a href="https://t.me/{other_username}">Buyer</a>'
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+    elif username == buyer_clean:
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Buyer</a>'
+        other_username = deal['seller'].lstrip('@')
+        other_role_link = f'<a href="https://t.me/{other_username}">Seller</a>'
+        other_link = f'<a href="https://t.me/{other_username}">{other_username}</a>'
+    else:
+        canceller_role_link = f'<a href="tg://user?id={user_id}">Admin</a>'
+        other_username = None
+        other_role_link = None
+        other_link = None
+
+    if active_deal_id in active_monitors:
+        del active_monitors[active_deal_id]
+
+    room_num = get_room_by_channel_id(chat_id)
+    if room_num:
+        mark_room_free(room_num)
+
+    await record_deal_result(deal, active_deal_id, "cancelled", chat_id)
+    del deals[active_deal_id]
+    save_deals()
+
+    if other_link:
+        cancel_text = (
+            f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
+            f"{other_link} [{other_role_link}] the deal has been "
+            f"cancelled by {canceller_link} [{canceller_role_link}]."
+        )
+    else:
+        cancel_text = (
+            f"<b><u>Deal</u></b> #{active_deal_id}\n\n"
+            f"The deal has been cancelled by {canceller_link} [{canceller_role_link}]."
+        )
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=cancel_text,
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+
+
+async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/changeaddy - Admin command to change escrow deposit addresses."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    chat_id = update.effective_chat.id
+    changeaddy_sessions[user_id] = {"chat_id": chat_id, "step": "slot"}
+
+    keyboard = [
+        [
+            InlineKeyboardButton("📍 Address 1", callback_data=f"chaddy_slot_1_{user_id}"),
+            InlineKeyboardButton("📍 Address 2", callback_data=f"chaddy_slot_2_{user_id}")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]
+    ]
+    await update.message.reply_text(
+        "<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Which address slot do you want to change?",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
 async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Set a specific address (Address 1 or Address 2) for a deal. Triggered by .setaddy command."""
     user_id = update.effective_user.id
@@ -4815,12 +7641,12 @@ async def set_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<b>⚙️ ADDRESS CONFIGURATION</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "<b>Usage:</b> <code>.setaddy [deal_id]</code>\n\n"
-            "<b>Example:</b> <code>.setaddy D1234</code>",
+            "<b>Example:</b> <code>.setaddy #D36432</code>",
             parse_mode="HTML"
         )
         return
 
-    deal_id = parts[1].split()[0].upper()
+    deal_id = parts[1].split()[0].strip("#").upper()
     if not deal_id.startswith("D"):
         deal_id = f"D{deal_id}"
 
@@ -4936,6 +7762,695 @@ async def set_2fa(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_info(f"User {user_id} (@{username}) set their 2FA code")
 
 
+async def wallets_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show all current escrow wallet addresses (admin only)."""
+    user_id = update.effective_user.id
+    if user_id not in ADMIN_USER_IDS:
+        return
+
+    msg = (
+        "<b>💰 ESCROW WALLETS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>🔸 USDT [BSC]</b>\n"
+        f"  ↳ A1: <code>{BSC_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  ↳ A2: <code>{BSC_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔸 USDT [Polygon]</b>\n"
+        f"  ↳ A1: <code>{POLYGON_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  ↳ A2: <code>{POLYGON_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔸 USDT [Solana]</b>\n"
+        f"  ↳ A1: <code>{SOL_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  ↳ A2: <code>{SOL_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "<b>🔹 USDC [BSC]</b>\n"
+        f"  ↳ A1: <code>{USDC_BSC_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  ↳ A2: <code>{USDC_BSC_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "<b>🔹 USDC [Polygon]</b>\n"
+        f"  ↳ A1: <code>{USDC_POLYGON_DEPOSIT_ADDRESS}</code>\n\n"
+        "<b>🔹 USDC [Solana]</b>\n"
+        f"  ↳ A1: <code>{USDC_SOL_DEPOSIT_ADDRESSES[0]}</code>\n"
+        f"  ↳ A2: <code>{USDC_SOL_DEPOSIT_ADDRESSES[1]}</code>\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Use /changeaddy to update</i>"
+    )
+
+    await update.message.reply_text(msg, parse_mode="HTML")
+
+
+async def add_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Add a chat to the working list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /addchat <chat_id>\n"
+            "Only numeric chat IDs are supported."
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    if raw_chat_id.startswith("@"):
+        await update.message.reply_text(
+            "Usernames are not supported. Please provide a numeric chat ID."
+        )
+        return
+    chat_id = parse_work_chat_id(raw_chat_id)
+    if chat_id is None:
+        await update.message.reply_text(
+            "Invalid chat ID. Please provide a numeric ID, such as "
+            "<code>-1001234567890</code>.",
+            parse_mode="HTML"
+        )
+        return
+    if is_work_chat(chat_id):
+        await update.message.reply_text(
+            f"Chat <code>{chat_id}</code> is already in the worklist.",
+            parse_mode="HTML"
+        )
+        return
+
+    work_chats.append(chat_id)
+    save_work_chats()
+    await update.message.reply_text(
+        f"✅ Added chat <code>{chat_id}</code> to the worklist.",
+        parse_mode="HTML"
+    )
+
+
+async def remove_work_chat(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Remove a chat from the working list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: /removechat <chat_id>\n"
+            "Only numeric chat IDs are supported."
+        )
+        return
+
+    raw_chat_id = context.args[0].strip()
+    if raw_chat_id.startswith("@"):
+        await update.message.reply_text(
+            "Usernames are not supported. Please provide a numeric chat ID."
+        )
+        return
+    chat_id = parse_work_chat_id(raw_chat_id)
+    if chat_id is None:
+        await update.message.reply_text(
+            "Invalid chat ID. Please provide a numeric ID, such as "
+            "<code>-1001234567890</code>.",
+            parse_mode="HTML"
+        )
+        return
+    if not is_work_chat(chat_id):
+        await update.message.reply_text(
+            f"Chat <code>{chat_id}</code> is not in the worklist.",
+            parse_mode="HTML"
+        )
+        return
+
+    marked_chat_id = get_marked_peer_id(chat_id)
+    for stored_chat_id in work_chats:
+        if stored_chat_id == chat_id or (
+            marked_chat_id is not None
+            and get_marked_peer_id(stored_chat_id) == marked_chat_id
+        ):
+            work_chats.remove(stored_chat_id)
+            break
+    save_work_chats()
+    await update.message.reply_text(
+        f"✅ Removed chat <code>{chat_id}</code> from the worklist.",
+        parse_mode="HTML"
+    )
+
+
+async def worklist(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the current working chat list."""
+    if update.effective_user.id != WORKLIST_ADMIN_ID:
+        return
+    if not work_chats:
+        await update.message.reply_text(
+            "<b>WORKLIST</b>\n\nNo chats added.",
+            parse_mode="HTML"
+        )
+        return
+
+    chat_lines = "\n".join(
+        f"• <code>{chat_id}</code>" for chat_id in work_chats
+    )
+    await update.message.reply_text(
+        f"<b>WORKLIST</b>\n\n{chat_lines}",
+        parse_mode="HTML"
+    )
+
+
+def parse_clone_profile_stats(text):
+    """Parse profile statistics pasted into a clone-profile session."""
+    labels = {
+        "Deal Success Rate": "success_rate",
+        "Successful Deals": "successful",
+        "Cancelled Deals": "cancelled",
+        "USDT Bought": "USDT Bought",
+        "USDT Sold": "USDT Sold",
+        "USDC Bought": "USDC Bought",
+        "USDC Sold": "USDC Sold",
+    }
+    label_pattern = "|".join(
+        re.escape(label) for label in sorted(labels, key=len, reverse=True)
+    )
+    parsed = {}
+    hidden_fields = set()
+
+    for line in text.splitlines():
+        clean_line = re.sub(r"</?b>", "", line, flags=re.IGNORECASE).strip()
+        match = re.match(
+            rf"^({label_pattern})\s*:\s*(.*?)\s*$",
+            clean_line,
+            flags=re.IGNORECASE
+        )
+        if not match:
+            continue
+
+        label = labels.get(match.group(1).title())
+        if label is None:
+            label = next(
+                value for key, value in labels.items()
+                if key.lower() == match.group(1).lower()
+            )
+        raw_value = match.group(2).strip()
+        if re.fullmatch(
+            r"(?:\[hidden\]|hidden)",
+            raw_value,
+            flags=re.IGNORECASE
+        ):
+            if label == "successful" or label == "cancelled":
+                hidden_fields.add(label)
+                parsed[label] = 0
+            elif label in (
+                "USDT Bought",
+                "USDT Sold",
+                "USDC Bought",
+                "USDC Sold"
+            ):
+                hidden_fields.add(label)
+                parsed[label] = 0.0
+            else:
+                parsed[label] = 0.0
+            continue
+
+        raw_value = re.sub(r"[%\s,]", "", raw_value)
+        try:
+            if label in ("successful", "cancelled"):
+                parsed[label] = int(raw_value)
+            else:
+                parsed[label] = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+
+    return (parsed, hidden_fields) if parsed else None
+
+
+def build_profile_stats_text(
+    display_username,
+    profile_user_id,
+    success_rate,
+    successful_deals,
+    cancelled_deals,
+    volumes,
+    volume_hidden=None,
+    deals_hidden=None,
+    apply_privacy=True
+):
+    """Build the profile statistics response."""
+    def format_amount(amount):
+        return "0" if amount == 0 else f"{amount:.2f}"
+
+    if volume_hidden is None:
+        volume_hidden = (
+            apply_privacy
+            and str(profile_user_id) in hidden_volume_users
+        )
+    if deals_hidden is None:
+        deals_hidden = (
+            apply_privacy
+            and str(profile_user_id) in hidden_deal_users
+        )
+    volume_display = "[Hidden]" if volume_hidden else None
+    deal_count_display = "[Hidden]" if deals_hidden else None
+
+    return (
+        f"@{display_username} ({profile_user_id if profile_user_id is not None else 'N/A'})\n\n"
+        "<b>Last 30 Days Data</b>\n"
+        f"Deal Success Rate: {success_rate}\n"
+        f"Successful Deals: {deal_count_display or successful_deals}\n"
+        f"Cancelled Deals: {deal_count_display or cancelled_deals}\n"
+        f"USDT Bought: {volume_display or format_amount(volumes['USDT Bought'])}\n"
+        f"USDT Sold: {volume_display or format_amount(volumes['USDT Sold'])}\n"
+        f"USDC Bought: {volume_display or format_amount(volumes['USDC Bought'])}\n"
+        f"USDC Sold: {volume_display or format_amount(volumes['USDC Sold'])}"
+    )
+
+
+async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show a user's deal statistics for the last 30 days."""
+    requester = update.effective_user
+    current_time = time.time()
+    last_profile_time = profile_cooldowns.get(requester.id)
+    if (
+        last_profile_time is not None
+        and current_time - last_profile_time < 60
+    ):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please wait for 1 minute before accessing another profile."
+        )
+        return
+
+    if not context.args:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Please use /profile <username>."
+        )
+        return
+
+    display_username = context.args[0].lstrip("@")
+    target_username = display_username.lower()
+    if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", display_username):
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
+        )
+        return
+
+    global userbot_client
+    if userbot_client is None:
+        try:
+            await init_userbot()
+        except Exception as init_error:
+            log_warning(f"Could not initialize userbot for profile: {init_error}")
+    if userbot_client is None:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
+        )
+        return
+
+    try:
+        target_entity = await userbot_client.get_entity(display_username)
+        if not isinstance(target_entity, User):
+            raise ValueError("resolved entity is not a user")
+        profile_user_id = int(target_entity.id)
+        if profile_user_id <= 0:
+            raise ValueError("resolved user ID is invalid")
+    except Exception as resolve_error:
+        log_warning(
+            f"Could not resolve profile user {display_username}: "
+            f"{resolve_error}"
+        )
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="Invalid username. Please provide a valid username."
+        )
+        return
+
+    cutoff = current_time - (30 * 24 * 3600)
+    profile_records = []
+    successful_deals = 0
+    cancelled_deals = 0
+    volumes = {
+        "USDT Bought": 0.0,
+        "USDT Sold": 0.0,
+        "USDC Bought": 0.0,
+        "USDC Sold": 0.0
+    }
+
+    for record in deal_history.values():
+        if not isinstance(record, dict):
+            continue
+        try:
+            record_ts = float(record.get("ts", 0))
+        except (TypeError, ValueError):
+            continue
+        if record_ts < cutoff:
+            continue
+
+        buyer = str(record.get("buyer", "")).lstrip("@").lower()
+        seller = str(record.get("seller", "")).lstrip("@").lower()
+        try:
+            buyer_id = int(record.get("buyer_id"))
+        except (TypeError, ValueError):
+            buyer_id = None
+        try:
+            seller_id = int(record.get("seller_id"))
+        except (TypeError, ValueError):
+            seller_id = None
+
+        buyer_matches = buyer_id == profile_user_id or (
+            buyer_id is None and target_username == buyer
+        )
+        seller_matches = seller_id == profile_user_id or (
+            seller_id is None and target_username == seller
+        )
+        if not buyer_matches and not seller_matches:
+            continue
+
+        profile_records.append((record_ts, record))
+        status = record.get("status")
+        if status == "completed":
+            successful_deals += 1
+            try:
+                amount = float(record.get("amount", 0))
+            except (TypeError, ValueError):
+                amount = 0.0
+            currency = str(record.get("currency", "")).upper()
+            if currency in ("USDT", "USDC"):
+                if buyer_matches:
+                    volumes[f"{currency} Bought"] += amount
+                if seller_matches:
+                    volumes[f"{currency} Sold"] += amount
+        elif status == "cancelled":
+            cancelled_deals += 1
+
+    total_deals = successful_deals + cancelled_deals
+    if total_deals:
+        success_rate = f"{successful_deals / total_deals * 100:.2f}%"
+    else:
+        success_rate = "0"
+
+    volume_hidden = str(profile_user_id) in hidden_volume_users
+    deals_hidden = str(profile_user_id) in hidden_deal_users
+    override = profile_overrides.get(str(profile_user_id))
+    if isinstance(override, dict):
+        volume_hidden = volume_hidden or bool(override.get("volume_hidden", False))
+        deals_hidden = deals_hidden or bool(override.get("deals_hidden", False))
+        try:
+            successful_deals = int(override.get("successful", 0))
+        except (TypeError, ValueError):
+            successful_deals = 0
+        try:
+            cancelled_deals = int(override.get("cancelled", 0))
+        except (TypeError, ValueError):
+            cancelled_deals = 0
+        for volume_key in volumes:
+            try:
+                volumes[volume_key] = float(override.get(volume_key, 0))
+            except (TypeError, ValueError):
+                volumes[volume_key] = 0.0
+        try:
+            override_rate = float(override.get("success_rate", 0))
+        except (TypeError, ValueError):
+            override_rate = 0.0
+        success_rate = (
+            "0" if override_rate == 0
+            else f"{override_rate:.2f}%"
+        )
+
+    profile_text = build_profile_stats_text(
+        display_username,
+        profile_user_id,
+        success_rate,
+        successful_deals,
+        cancelled_deals,
+        volumes,
+        volume_hidden=volume_hidden,
+        deals_hidden=deals_hidden
+    )
+    try:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=profile_text,
+            parse_mode="HTML"
+        )
+    except Exception as profile_error:
+        log_warning(f"Could not send profile for {display_username}: {profile_error}")
+        return
+    profile_cooldowns[requester.id] = time.time()
+
+
+async def clone_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start an admin session to override a user's profile statistics."""
+    requester = update.effective_user
+    if requester.id not in ADMIN_USER_IDS:
+        return
+
+    global userbot_client
+    target_id = None
+    target_name = None
+
+    if not context.args:
+        target_id = int(requester.id)
+        target_name = requester.username or str(target_id)
+    else:
+        raw_target = context.args[0].strip()
+        if raw_target.isdigit():
+            target_id = int(raw_target)
+            if target_id <= 0:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            if userbot_client is None:
+                try:
+                    await init_userbot()
+                except Exception as init_error:
+                    log_warning(
+                        f"Could not initialize userbot for clone profile: "
+                        f"{init_error}"
+                    )
+            if userbot_client is not None:
+                try:
+                    target_entity = await userbot_client.get_entity(target_id)
+                    if (
+                        isinstance(target_entity, User)
+                        and getattr(target_entity, "username", None)
+                    ):
+                        target_name = target_entity.username.lstrip("@")
+                except Exception as resolve_error:
+                    log_warning(
+                        f"Could not resolve clone profile user {target_id}: "
+                        f"{resolve_error}"
+                    )
+            target_name = target_name or str(target_id)
+        else:
+            display_username = raw_target.lstrip("@")
+            if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", display_username):
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            if userbot_client is None:
+                try:
+                    await init_userbot()
+                except Exception as init_error:
+                    log_warning(
+                        f"Could not initialize userbot for clone profile: "
+                        f"{init_error}"
+                    )
+            if userbot_client is None:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+            try:
+                target_entity = await userbot_client.get_entity(display_username)
+                if not isinstance(target_entity, User):
+                    raise ValueError("resolved entity is not a user")
+                target_id = int(target_entity.id)
+                if target_id <= 0:
+                    raise ValueError("resolved user ID is invalid")
+                target_name = (
+                    getattr(target_entity, "username", None)
+                    or display_username
+                ).lstrip("@")
+            except Exception as resolve_error:
+                log_warning(
+                    f"Could not resolve clone profile user {display_username}: "
+                    f"{resolve_error}"
+                )
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="Invalid username. Please provide a valid username."
+                )
+                return
+
+    clone_profile_sessions[requester.id] = {
+        "target_id": target_id,
+        "target_name": target_name,
+        "chat_id": update.effective_chat.id,
+        "ts": time.time()
+    }
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text=(
+            f"Send the filled stats for @{target_name} ({target_id}):\n\n"
+            "Deal Success Rate:\n"
+            "Successful Deals:\n"
+            "Cancelled Deals:\n"
+            "USDT Bought:\n"
+            "USDT Sold:\n"
+            "USDC Bought:\n"
+            "USDC Sold:"
+        )
+    )
+
+
+async def sendmsg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a message to another chat as the bot."""
+    requester = update.effective_user
+    if requester.id not in ADMIN_USER_IDS:
+        return
+
+    origin_chat_id = update.effective_chat.id
+    command_text = update.effective_message.text or ""
+    command_parts = command_text.split(maxsplit=1)
+    if len(command_parts) < 2:
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text="Please use /sendmsg <chat id>."
+        )
+        return
+
+    target_and_text = command_parts[1].lstrip()
+    target_parts = target_and_text.split(maxsplit=1)
+    raw_target = target_parts[0]
+    if not re.fullmatch(r"[+-]?\d+", raw_target):
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text="Please use /sendmsg <chat id>."
+        )
+        return
+    target_chat_id = int(raw_target)
+
+    if len(target_parts) > 1:
+        text_to_send = target_parts[1]
+        prefix = command_text[:len(command_text) - len(text_to_send)]
+        shift = len(prefix.encode("utf-16-le")) // 2
+        adjusted_entities = []
+        for entity in update.effective_message.entities or []:
+            if entity.offset < shift:
+                continue
+            adjusted_entities.append(
+                MessageEntity.de_json(
+                    {
+                        **entity.to_dict(),
+                        "offset": entity.offset - shift
+                    },
+                    context.bot
+                )
+            )
+        try:
+            await context.bot.send_message(
+                chat_id=target_chat_id,
+                text=text_to_send,
+                entities=adjusted_entities or None
+            )
+        except Exception as send_error:
+            log_warning(
+                f"Could not send message to {target_chat_id}: {send_error}"
+            )
+            await context.bot.send_message(
+                chat_id=origin_chat_id,
+                text=(
+                    f"Could not send the message to {target_chat_id}. "
+                    f"{send_error}"
+                )
+            )
+            return
+
+        await context.bot.send_message(
+            chat_id=origin_chat_id,
+            text=f"Message sent to {target_chat_id}."
+        )
+        return
+
+    sendmsg_sessions[requester.id] = {
+        "target_chat_id": target_chat_id,
+        "chat_id": origin_chat_id,
+        "ts": time.time()
+    }
+    await context.bot.send_message(
+        chat_id=origin_chat_id,
+        text=f"Please send the message to {target_chat_id}."
+    )
+
+
+async def hide_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hide the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id in hidden_volume_users:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted out  to hide trading volume."
+        )
+        return
+
+    hidden_volume_users[user_id] = True
+    save_hidden_volume()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted out successfully to hide trading volume."
+    )
+
+
+async def show_volume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id not in hidden_volume_users:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted in to show trading volume."
+        )
+        return
+
+    del hidden_volume_users[user_id]
+    save_hidden_volume()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted in successfully to show trading volume."
+    )
+
+
+async def hide_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Hide the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id in hidden_deal_users:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted out to hide deal count."
+        )
+        return
+
+    hidden_deal_users[user_id] = True
+    save_hidden_deals()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted out successfully to hide deal count."
+    )
+
+
+async def show_deal_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the requesting user's deal counts in profile responses."""
+    user_id = str(update.effective_user.id)
+    if user_id not in hidden_deal_users:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="You are already opted in to show deal count."
+        )
+        return
+
+    del hidden_deal_users[user_id]
+    save_hidden_deals()
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="You have opted in successfully to show deal count."
+    )
+
+
 async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show all available commands (admin only)."""
     user_id = update.effective_user.id
@@ -4948,7 +8463,12 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>📋 COMMAND LIST</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "<b>👥 General Commands:</b>\n"
-        "├ /escrow @username - Start escrow deal\n"
+        "├ /escrow @username [room] - Start escrow deal\n"
+        "├ /profile [@username] - View 30-day deal stats\n"
+        "├ /hide_volume - Hide your trading volume\n"
+        "├ /show_volume - Show your trading volume\n"
+        "├ /hide_deal_number - Hide your deal count\n"
+        "├ /show_deal_number - Show your deal count\n"
         "├ /exampleform - Show deal form format\n"
         "├ /clean - Clean room after deal\n"
         "└ /set2fa [code] - Set your 2FA code\n\n"
@@ -4956,15 +8476,25 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .cmd - Show this command list\n"
         "├ .rooms - View all room statuses\n"
         "├ .empty - Empty all rooms\n"
-        "├ .deleteall - Delete all rooms\n"
+        "├ .deleteall - Clear room data\n"
+        "├ .delete_rooms - Delete all Telegram groups\n"
+        "├ /markactive [chat_id] - Register group as room\n"
+        "├ /markinactive [chat_id] - Remove room from pool\n"
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
+        "├ /changeaddy - Change escrow address\n"
         "├ .setaddy [deal_id] - Set deal address\n"
         "├ .ban @user - Ban user from bot\n"
         "├ .unban @user - Unban from bot\n"
         "├ .gunban @user - Unban from all groups\n"
         "├ .banned - List banned users\n"
         "├ .complete - Mark deal as completed\n"
+        "├ /cloneprofile [@username|id] - Override profile stats\n"
+        "├ /sendmsg [chat_id] - Send a message via the bot\n"
+        "├ .wallets - View all escrow addresses\n"
+        "├ /addchat [chat_id] - Add chat to worklist\n"
+        "├ /removechat [chat_id] - Remove chat from worklist\n"
+        "├ /worklist - View working chat list\n"
         "└ .review - Scan rooms for issues"
     )
 
@@ -4999,7 +8529,10 @@ async def review_rooms(update: Update, context: ContextTypes.DEFAULT_TYPE):
         group_exists = False
         if channel_id and userbot_client:
             try:
-                entity = await userbot_client.get_entity(int(f"-100{channel_id}"))
+                full_channel_id = get_marked_peer_id(channel_id)
+                if full_channel_id is None:
+                    raise ValueError("Invalid channel_id")
+                await userbot_client.get_entity(full_channel_id)
                 group_exists = True
             except Exception:
                 group_exists = False
@@ -5213,9 +8746,22 @@ async def main():
     load_group_data()
     load_deals()
     load_rooms()
+    load_old_rooms()
     load_banned_users()
     load_user_2fa()
     load_deal_form_cache()
+    load_force_escrow()
+    load_work_chats()
+    load_deal_history()
+    load_hidden_volume()
+    load_hidden_deals()
+    load_profile_overrides()
+
+    # Load escrow addresses from JSON (permanent storage)
+    addr_data = load_escrow_addresses()
+    _apply_addresses_from_data(addr_data)
+    log_info(f"Escrow addresses loaded from {ESCROW_ADDRESSES_FILE}")
+
     log_info("Database initialized")
 
     # Log room status
@@ -5236,17 +8782,37 @@ async def main():
     await init_userbot()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    # Add 0.25s delay to all bot API requests
+    _original_do_post = app.bot._do_post
+    async def _delayed_do_post(*args, **kwargs):
+        await asyncio.sleep(0.25)
+        return await _original_do_post(*args, **kwargs)
+    app.bot._do_post = _delayed_do_post
+    app.add_handler(TypeHandler(Update, whitelist_gate), group=-1)
     # General commands (slash prefix)
     app.add_handler(CommandHandler("escrow", escrow))
+    app.add_handler(CommandHandler("profile", profile_command))
+    app.add_handler(CommandHandler("hide_volume", hide_volume))
+    app.add_handler(CommandHandler("show_volume", show_volume))
+    app.add_handler(CommandHandler("hide_deal_number", hide_deal_number))
+    app.add_handler(CommandHandler("show_deal_number", show_deal_number))
+    app.add_handler(CommandHandler("cloneprofile", clone_profile))
+    app.add_handler(CommandHandler("sendmsg", sendmsg))
+    app.add_handler(CommandHandler("forceescrow", forceescrow))
     app.add_handler(CommandHandler("exampleform", exampleform))
     app.add_handler(CommandHandler("clean", clean))
     app.add_handler(CommandHandler("set2fa", set_2fa))
     app.add_handler(CommandHandler("kickall", kickall))
+    app.add_handler(CommandHandler("addchat", add_work_chat))
+    app.add_handler(CommandHandler("removechat", remove_work_chat))
+    app.add_handler(CommandHandler("worklist", worklist))
     # Admin commands (dot prefix)
     app.add_handler(MessageHandler(filters.Regex(r'^\.setup_rooms\b'), setup_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.rooms\b'), rooms_status))
     app.add_handler(MessageHandler(filters.Regex(r'^\.empty\b'), empty_all_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.deleteall\b'), delete_all_rooms))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.delete_rooms\b'), delete_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.newrooms\b'), create_new_rooms))
     app.add_handler(MessageHandler(filters.Regex(r'^\.ban\b'), ban_user))
     app.add_handler(MessageHandler(filters.Regex(r'^\.unban\b'), unban_user))
@@ -5254,17 +8820,26 @@ async def main():
     app.add_handler(MessageHandler(filters.Regex(r'^\.banned\b'), list_banned))
     app.add_handler(MessageHandler(filters.Regex(r'^\.cmd\b'), cmd_list))
     app.add_handler(MessageHandler(filters.Regex(r'^\.setaddy\b'), set_address))
+    app.add_handler(MessageHandler(filters.Regex(r'^\.wallets\b'), wallets_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.complete\b'), complete_deal))
+    app.add_handler(CommandHandler("cancel", cancel_command))
+    app.add_handler(CommandHandler("markactive", mark_active))
+    app.add_handler(CommandHandler("markinactive", mark_inactive))
     app.add_handler(CommandHandler("manualadd", manual_add))
+    app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
+    app.add_handler(InlineQueryHandler(handle_inline_query))
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(
         filters.TEXT & ~filters.COMMAND, handle_message
     ))
     app.add_handler(MessageHandler(
         filters.PHOTO, handle_photo
+    ))
+    app.add_handler(MessageHandler(
+        filters.ALL & ~filters.COMMAND, handle_message
     ))
 
     log_info("Bot started successfully")
