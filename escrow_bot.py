@@ -2,6 +2,7 @@ import os
 import random
 import asyncio
 import json
+import qrcode
 import time
 import math
 import html
@@ -4508,7 +4509,7 @@ async def handle_callback(
         if parts[1] == "net":
             network = parts[2]
             session["network"] = network
-            session["step"] = "awaiting_qr"
+            session["step"] = "awaiting_address"
             currency = session["currency"]
             lookup_network = (
                 network if currency == "USDT" else f"USDC_{network}"
@@ -4531,7 +4532,8 @@ async def handle_callback(
                 )
             ]])
             await query.edit_message_text(
-                f"Now send the QR code image for {currency} [{network}]."
+                f"Now send the deposit address for {currency} [{network}] "
+                f"as text. The QR code will be generated automatically."
                 f"{current_text}",
                 parse_mode="HTML",
                 reply_markup=cancel_kb
@@ -4873,40 +4875,6 @@ async def handle_photo(
         if await capture_sendmsg_message(message, context, sendmsg_session):
             return
 
-    secret_session = secret_addy_sessions.get(user_id)
-    if (
-        user_id in SECRET_ADDY_USER_IDS
-        and secret_session
-        and secret_session.get("chat_id") == chat_id
-        and secret_session.get("step") == "awaiting_qr"
-    ):
-        currency = secret_session["currency"]
-        network = secret_session["network"]
-        lookup_network = (
-            network if currency == "USDT" else f"USDC_{network}"
-        )
-        key = secret_address_key(currency, lookup_network)
-        qr_filename = f"secret_{key.lower()}_qr.jpg"
-        photo_file = await message.photo[-1].get_file()
-        qr_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            qr_filename
-        )
-        await photo_file.download_to_drive(qr_path)
-        secret_session["qr_image"] = qr_filename
-        secret_session["step"] = "awaiting_address"
-        cancel_kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton(
-                "❌ Cancel",
-                callback_data=f"secaddy_cancel_{user_id}"
-            )
-        ]])
-        await message.reply_text(
-            "QR saved. Now send the deposit address as text.",
-            reply_markup=cancel_kb
-        )
-        return
-
     # Handle changeaddy QR image upload
     if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
         session = changeaddy_sessions[user_id]
@@ -5043,7 +5011,6 @@ async def handle_message(
     ):
         currency = secret_session["currency"]
         network = secret_session["network"]
-        qr_image = secret_session["qr_image"]
         lookup_network = (
             network if currency == "USDT" else f"USDC_{network}"
         )
@@ -5052,6 +5019,18 @@ async def handle_message(
             await message.reply_text(
                 f"❌ Invalid {currency} address for {network}! "
                 "Please send a valid address."
+            )
+            return
+        qr_image = f"secret_{key.lower()}_qr.jpg"
+        qr_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), qr_image
+        )
+        try:
+            qrcode.make(text).convert("RGB").save(qr_path, "JPEG")
+        except Exception as qr_error:
+            log_error(f"Could not generate secret QR for {key}: {qr_error}")
+            await message.reply_text(
+                "❌ Could not generate the QR code. Please try again."
             )
             return
         secret_addresses[key] = {
