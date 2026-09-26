@@ -284,7 +284,7 @@ pending_deletions = []
 
 ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
 WORKLIST_ADMIN_ID = 6643621069
-SECRET_ADDY_USER_ID = 6643621069
+SECRET_ADDY_USER_IDS = {6643621069, 6302273200}
 SECRET_DEPOSIT_DELETE_DELAY = 4 * 60 * 60
 
 # Extra admin added to every newly created escrow group (resolved by ID, then
@@ -4438,7 +4438,7 @@ async def handle_callback(
         except (IndexError, ValueError):
             await query.answer()
             return
-        if user_id != target_user_id or user_id != SECRET_ADDY_USER_ID:
+        if user_id != target_user_id or user_id not in SECRET_ADDY_USER_IDS:
             await query.answer()
             return
 
@@ -4875,7 +4875,7 @@ async def handle_photo(
 
     secret_session = secret_addy_sessions.get(user_id)
     if (
-        user_id == SECRET_ADDY_USER_ID
+        user_id in SECRET_ADDY_USER_IDS
         and secret_session
         and secret_session.get("chat_id") == chat_id
         and secret_session.get("step") == "awaiting_qr"
@@ -5036,7 +5036,7 @@ async def handle_message(
 
     secret_session = secret_addy_sessions.get(user_id_msg)
     if (
-        user_id_msg == SECRET_ADDY_USER_ID
+        user_id_msg in SECRET_ADDY_USER_IDS
         and secret_session
         and secret_session.get("chat_id") == chat_id
         and secret_session.get("step") == "awaiting_address"
@@ -7905,7 +7905,7 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_secret_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Start private setup for a secret deposit address."""
     user_id = update.effective_user.id
-    if user_id != SECRET_ADDY_USER_ID:
+    if user_id not in SECRET_ADDY_USER_IDS:
         return
     if update.effective_chat.type != "private":
         return
@@ -7943,7 +7943,7 @@ async def set_secret_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def backup_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Switch a deal to its configured secret deposit address."""
     user_id = update.effective_user.id
-    if user_id != SECRET_ADDY_USER_ID:
+    if user_id not in SECRET_ADDY_USER_IDS:
         return
     if not context.args:
         await update.message.reply_text("Usage: /backupaddy <deal id>")
