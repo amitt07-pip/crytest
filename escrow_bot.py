@@ -7971,12 +7971,8 @@ async def backup_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     currency = deal.get('currency', 'USDT')
     network = deal.get('network')
     secret = None
-    key = None
     if network:
-        lookup_network = (
-            network if currency == "USDT" else f"USDC_{network}"
-        )
-        key = secret_address_key(currency, lookup_network)
+        key = secret_address_key(currency, network)
         secret = secret_addresses.get(key)
         if secret is None:
             await update.message.reply_text(
