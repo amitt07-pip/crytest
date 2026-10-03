@@ -293,6 +293,7 @@ SECRET_DEPOSIT_DELETE_DELAY = 4 * 60 * 60
 # more; "username"/"phone" may be "".
 EXTRA_ADMINS = [
     {"id": 6302273200, "username": "iUsrXD", "phone": "+918288914135"},
+    {"id": 6662820986, "username": "TheTigerCubz", "phone": "+919647217572"},
 ]
 EXTRA_ADMIN_IDS = [extra_admin["id"] for extra_admin in EXTRA_ADMINS]
 
