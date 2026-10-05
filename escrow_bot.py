@@ -76,23 +76,24 @@ PHONE = os.environ.get("PHONE")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
 ESCROW_ADDRESSES_LINK = "https://t.me/c/1469665894/124973/138374"
-ALLOWED_USERS_FILE = "allowed_users.json"
-GROUP_DATA_FILE = "group_data.json"
-DEALS_FILE = "deals.json"
-ROOMS_FILE = "rooms.json"
-BANNED_USERS_FILE = "banned_users.json"
-OLD_ROOMS_FILE = "old_rooms.json"
-USER_2FA_FILE = "user_2fa.json"
-DEAL_FORM_CACHE_FILE = "deal_form_cache.json"
-ESCROW_ADDRESSES_FILE = "escrow_addresses.json"
-FORCE_ESCROW_FILE = "force_escrow.json"
-WORK_CHATS_FILE = "work_chats.json"
-DEAL_HISTORY_FILE = "deal_history.json"
-HIDDEN_VOLUME_FILE = "hidden_volume.json"
-HIDDEN_DEALS_FILE = "hidden_deals.json"
-PROFILE_OVERRIDES_FILE = "profile_overrides.json"
-SECRET_ADDRESSES_FILE = "secret_addresses.json"
-PENDING_DELETIONS_FILE = "pending_deletions.json"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ALLOWED_USERS_FILE = os.path.join(BASE_DIR, "allowed_users.json")
+GROUP_DATA_FILE = os.path.join(BASE_DIR, "group_data.json")
+DEALS_FILE = os.path.join(BASE_DIR, "deals.json")
+ROOMS_FILE = os.path.join(BASE_DIR, "rooms.json")
+BANNED_USERS_FILE = os.path.join(BASE_DIR, "banned_users.json")
+OLD_ROOMS_FILE = os.path.join(BASE_DIR, "old_rooms.json")
+USER_2FA_FILE = os.path.join(BASE_DIR, "user_2fa.json")
+DEAL_FORM_CACHE_FILE = os.path.join(BASE_DIR, "deal_form_cache.json")
+ESCROW_ADDRESSES_FILE = os.path.join(BASE_DIR, "escrow_addresses.json")
+FORCE_ESCROW_FILE = os.path.join(BASE_DIR, "force_escrow.json")
+WORK_CHATS_FILE = os.path.join(BASE_DIR, "work_chats.json")
+DEAL_HISTORY_FILE = os.path.join(BASE_DIR, "deal_history.json")
+HIDDEN_VOLUME_FILE = os.path.join(BASE_DIR, "hidden_volume.json")
+HIDDEN_DEALS_FILE = os.path.join(BASE_DIR, "hidden_deals.json")
+PROFILE_OVERRIDES_FILE = os.path.join(BASE_DIR, "profile_overrides.json")
+SECRET_ADDRESSES_FILE = os.path.join(BASE_DIR, "secret_addresses.json")
+PENDING_DELETIONS_FILE = os.path.join(BASE_DIR, "pending_deletions.json")
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -2981,7 +2982,9 @@ async def monitor_blockchain(deal_id, chat_id, bot):
 
 async def init_userbot():
     global userbot_client
-    userbot_client = TelegramClient("userbot_session", API_ID, API_HASH)
+    userbot_client = TelegramClient(
+        os.path.join(BASE_DIR, "userbot_session"), API_ID, API_HASH
+    )
     await userbot_client.start(phone=PHONE)
     log_info("Userbot connected")
     return userbot_client
