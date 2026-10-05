@@ -8910,6 +8910,7 @@ async def cmd_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "├ .newrooms - Create 20 new rooms\n"
         "├ .setup_rooms - Initialize room pool\n"
         "├ /changeaddy - Change escrow address\n"
+        "├ /addylist - View all escrow addresses\n"
         "├ .setaddy [deal_id] - Set deal address\n"
         "├ .ban @user - Ban user from bot\n"
         "├ .unban @user - Unban from bot\n"
@@ -9256,6 +9257,7 @@ async def main():
     app.add_handler(CommandHandler("markinactive", mark_inactive))
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
+    app.add_handler(CommandHandler("addylist", wallets_command))
     app.add_handler(CommandHandler("setsecretaddy", set_secret_addy))
     app.add_handler(CommandHandler("backupaddy", backup_addy))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
