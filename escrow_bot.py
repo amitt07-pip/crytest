@@ -4670,7 +4670,7 @@ async def handle_callback(
                 return
             session = changeaddy_sessions[user_id]
             session["network"] = network
-            session["step"] = "awaiting_qr"
+            session["step"] = "awaiting_address"
             slot = session["slot"]
             currency = session["currency"]
             index = slot - 1
@@ -4688,7 +4688,7 @@ async def handle_callback(
                 f"<b>Current Address:</b>\n<code>{cur_addr}</code>\n\n"
                 f"<b>Current QR:</b> <code>{cur_qr}</code>\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"📸 <b>Now send the new QR code image or cancel.</b>"
+                f"📝 <b>Now send the new deposit address as text, or cancel.</b>"
             )
             cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
 
@@ -4875,7 +4875,7 @@ async def capture_sendmsg_message(message, context, session):
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    """Handle photo messages - for payment details QR codes and changeaddy QR uploads."""
+    """Handle photo messages for payment details and secret address QR codes."""
     global deals
 
     message = update.message
@@ -4894,56 +4894,6 @@ async def handle_photo(
     ):
         if await capture_sendmsg_message(message, context, sendmsg_session):
             return
-
-    # Handle changeaddy QR image upload
-    if user_id in changeaddy_sessions and changeaddy_sessions[user_id].get("step") == "awaiting_qr":
-        session = changeaddy_sessions[user_id]
-        slot = session["slot"]
-        currency = session["currency"]
-        network = session["network"]
-        index = slot - 1
-
-        # Download the photo
-        photo_file = await message.photo[-1].get_file()
-        # Build filename based on currency/network/slot
-        if currency == "USDT":
-            if slot == 1:
-                qr_filename = f"{network.lower()}_address1_qr.jpg"
-            else:
-                qr_filename = f"{network.lower()}_qr_2.jpg"
-        else:
-            if network == "POLYGON":
-                qr_filename = "usdc_polygon_address1_qr.jpg"
-            elif network == "SOL":
-                if slot == 1:
-                    qr_filename = "usdc_sol_qr_1.jpg"
-                else:
-                    qr_filename = "usdc_sol_address1_qr.jpg"
-            else:
-                if slot == 1:
-                    qr_filename = f"usdc_{network.lower()}_address1_qr.jpg"
-                else:
-                    qr_filename = f"usdc_{network.lower()}_qr_2.jpg"
-
-        import os
-        qr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), qr_filename)
-        await photo_file.download_to_drive(qr_path)
-
-        session["new_qr_filename"] = qr_filename
-        session["step"] = "awaiting_address"
-
-        cancel_kb = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data=f"chaddy_cancel_{user_id}")]])
-        await message.reply_text(
-            f"<b>🔄 CHANGE ESCROW ADDRESS</b>\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"<b>Changing:</b> Address {slot} | {currency} | {network}\n\n"
-            f"✅ QR code saved as <code>{qr_filename}</code>\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📝 <b>Now send the new deposit address as text, or cancel.</b>",
-            parse_mode="HTML",
-            reply_markup=cancel_kb
-        )
-        return
 
     if not message.reply_to_message:
         return
@@ -5074,7 +5024,6 @@ async def handle_message(
         slot = session["slot"]
         currency = session["currency"]
         network = session["network"]
-        new_qr_filename = session["new_qr_filename"]
         index = slot - 1
         new_address = text.strip()
 
@@ -5083,6 +5032,20 @@ async def handle_message(
             await message.reply_text(
                 f"❌ Invalid {currency} address for {network}! Please send a valid address.",
                 parse_mode="HTML"
+            )
+            return
+
+        new_qr_filename = changeaddy_qr_filename(currency, network, slot)
+        qr_path = os.path.join(BASE_DIR, new_qr_filename)
+        try:
+            qrcode.make(new_address).convert("RGB").save(qr_path, "JPEG")
+        except Exception as qr_error:
+            log_error(
+                f"Could not generate QR for {currency} {network} "
+                f"Address {slot}: {qr_error}"
+            )
+            await message.reply_text(
+                "❌ Could not generate the QR code. Please try again."
             )
             return
 
@@ -7778,6 +7741,23 @@ def set_address_and_qr(currency, network, index, new_address, new_qr_filename):
             DEPOSIT_ADDRESSES[key] = new_address
     # Save to JSON permanently
     save_escrow_addresses()
+
+
+def changeaddy_qr_filename(currency, network, slot):
+    """Return the existing QR filename for an address slot."""
+    if currency == "USDT":
+        if slot == 1:
+            return f"{network.lower()}_address1_qr.jpg"
+        return f"{network.lower()}_qr_2.jpg"
+    if network == "POLYGON":
+        return "usdc_polygon_address1_qr.jpg"
+    if network == "SOL":
+        if slot == 1:
+            return "usdc_sol_qr_1.jpg"
+        return "usdc_sol_address1_qr.jpg"
+    if slot == 1:
+        return f"usdc_{network.lower()}_address1_qr.jpg"
+    return f"usdc_{network.lower()}_qr_2.jpg"
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
