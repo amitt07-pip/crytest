@@ -4875,7 +4875,7 @@ async def capture_sendmsg_message(message, context, session):
 async def handle_photo(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ):
-    """Handle photo messages for payment details and secret address QR codes."""
+    """Handle photo messages for payment details."""
     global deals
 
     message = update.message
@@ -5009,13 +5009,25 @@ async def handle_message(
         }
         save_secret_addresses()
         secret_addy_sessions.pop(user_id_msg, None)
-        await message.reply_text(
+        success_text = (
             f"<b>Secret address saved</b>\n"
             f"<b>Key:</b> <code>{key}</code>\n"
             f"<b>Address:</b> <code>{html.escape(text)}</code>\n"
-            f"<b>QR Image:</b> <code>{html.escape(qr_image)}</code>",
-            parse_mode="HTML"
+            f"<b>QR Image:</b> <code>{html.escape(qr_image)}</code>"
         )
+        try:
+            with open(qr_path, "rb") as qr_file:
+                await message.reply_photo(
+                    photo=qr_file,
+                    caption=success_text,
+                    parse_mode="HTML"
+                )
+        except Exception as send_error:
+            log_warning(
+                f"Could not send generated secret QR for {key}: "
+                f"{send_error}"
+            )
+            await message.reply_text(success_text, parse_mode="HTML")
         return
 
     # Handle changeaddy address text input
@@ -5058,7 +5070,7 @@ async def handle_message(
         # Clean up session
         changeaddy_sessions.pop(user_id_msg, None)
 
-        await message.reply_text(
+        success_text = (
             f"<b>✅ ADDRESS UPDATED SUCCESSFULLY</b>\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"<b>Slot:</b> Address {slot}\n"
@@ -5066,9 +5078,21 @@ async def handle_message(
             f"<b>Network:</b> {network}\n\n"
             f"<b>Old Address:</b>\n<code>{old_addr}</code>\n\n"
             f"<b>New Address:</b>\n<code>{new_address}</code>\n\n"
-            f"<b>QR Image:</b> <code>{new_qr_filename}</code>",
-            parse_mode="HTML"
+            f"<b>QR Image:</b> <code>{new_qr_filename}</code>"
         )
+        try:
+            with open(qr_path, "rb") as qr_file:
+                await message.reply_photo(
+                    photo=qr_file,
+                    caption=success_text,
+                    parse_mode="HTML"
+                )
+        except Exception as send_error:
+            log_warning(
+                f"Could not send generated QR for {currency} {network} "
+                f"Address {slot}: {send_error}"
+            )
+            await message.reply_text(success_text, parse_mode="HTML")
         log_info(f"Admin {user_id_msg} changed {currency} {network} Address {slot} from {old_addr} to {new_address}")
         return
 
