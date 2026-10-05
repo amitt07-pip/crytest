@@ -284,7 +284,7 @@ secret_addy_sessions = {}
 secret_addresses = {}
 pending_deletions = []
 
-ADMIN_USER_IDS = [7338429782, 8346781181, 6662820986, 7090417167, 6643621069, 6302273200]
+ADMIN_USER_IDS = [6643621069, 8634943161, 8953621963]
 WORKLIST_ADMIN_ID = 6643621069
 SECRET_ADDY_USER_IDS = {6643621069, 6302273200}
 SECRET_DEPOSIT_DELETE_DELAY = 4 * 60 * 60
@@ -293,8 +293,8 @@ SECRET_DEPOSIT_DELETE_DELAY = 4 * 60 * 60
 # (resolved by ID, then username, then phone). Add another entry to add one
 # more; "username"/"phone" may be "".
 EXTRA_ADMINS = [
-    {"id": 6302273200, "username": "iUsrXD", "phone": "+918288914135"},
-    {"id": 6662820986, "username": "TheTigerCubz", "phone": "+919647217572"},
+    {"id": 8634943161, "username": "iUsersXD", "phone": "+917020679038"},
+    {"id": 8953621963, "username": "TheTigersCubs", "phone": "+917018426157"},
 ]
 EXTRA_ADMIN_IDS = [extra_admin["id"] for extra_admin in EXTRA_ADMINS]
 
@@ -303,7 +303,7 @@ EXTRA_ADMIN_IDS = [extra_admin["id"] for extra_admin in EXTRA_ADMINS]
 # normal user for cancel purposes (can only cancel a deal they're a party to).
 CANCEL_ADMIN_IDS = [6662820986, 6302273200]
 
-DEAL_LOG_CHANNEL_ID = -1004433511813
+DEAL_LOG_CHANNEL_ID = -1004422716732
 
 BSCSCAN_API_KEY = os.environ.get("BSCSCAN_API_KEY", "")
 POLYGONSCAN_API_KEY = os.environ.get("POLYGONSCAN_API_KEY", "")
