@@ -1708,7 +1708,7 @@ def format_party_link(display_name, user_id, role):
 
 
 def build_payment_details_prompt(deal_id, seller_part, payment_method):
-    """Build the seller payment-details prompt, with a format block for UPI/GC."""
+    """Build the seller payment-details prompt, with a format block per method."""
     method = str(payment_method or "")
     if "upi" in method.lower():
         format_block = (
@@ -1721,6 +1721,15 @@ def build_payment_details_prompt(deal_id, seller_part, payment_method):
             "Format:\n\n"
             "➤ <b>Gift Card:</b>\n"
             "<code>Email:</code>\n\n"
+        )
+    elif re.search(r"\bcdm\b", method, re.IGNORECASE):
+        format_block = (
+            "Format:\n\n"
+            "➤ <b>CDM (Cash Deposit Machine):</b>\n"
+            "<code>Bank Name:</code>\n"
+            "<code>Account Type (Current/Saving):</code>\n"
+            "<code>Account Holder Name:</code>\n"
+            "<code>Account Number:</code>\n\n"
         )
     else:
         format_block = ""
