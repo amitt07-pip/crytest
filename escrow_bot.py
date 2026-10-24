@@ -1707,6 +1707,37 @@ def format_party_link(display_name, user_id, role):
     return f"{escaped_name} [{role_label}]"
 
 
+def build_payment_details_prompt(deal_id, seller_part, payment_method):
+    """Build the seller payment-details prompt, with a format block for UPI/GC."""
+    method = str(payment_method or "")
+    if "upi" in method.lower():
+        format_block = (
+            "Format:\n\n"
+            "➤ <b>UPI Payment:</b>\n"
+            "<code>UPI ID:</code>\n\n"
+        )
+    elif re.search(r"gift\s*card|\bgc\b", method, re.IGNORECASE):
+        format_block = (
+            "Format:\n\n"
+            "➤ <b>Gift Card:</b>\n"
+            "<code>Email:</code>\n\n"
+        )
+    else:
+        format_block = ""
+    details_label = (
+        "<b>Payment Details.</b>" if format_block
+        else "<b>Payment Details</b>."
+    )
+    return (
+        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+        f"{seller_part}, please <b>QUOTE</b> this message "
+        f"and reply with your {details_label}\n\n"
+        f"{format_block}"
+        "Please make sure that all details are correct to avoid any "
+        "payment issues."
+    )
+
+
 def format_party_name_link(display_name, user_id):
     """Format a deal party's escaped display name without the role label."""
     escaped_name = html.escape(str(display_name or "Unknown"))
@@ -5278,25 +5309,9 @@ async def handle_message(
                 seller_part = format_party_link(
                     seller_name, seller_id, "seller"
                 )
-                if "upi" in str(deal.get('payment_method', '')).lower():
-                    payment_msg = (
-                        f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                        f"{seller_part}, please <b>QUOTE</b> this message "
-                        f"and reply with your <b>Payment Details.</b>\n\n"
-                        f"Format:\n\n"
-                        f"➤ <b>UPI Payment:</b>\n"
-                        f"<code>UPI ID:</code>\n\n"
-                        f"Please make sure that all details are correct to "
-                        f"avoid any payment issues."
-                    )
-                else:
-                    payment_msg = (
-                        f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                        f"{seller_part}, please <b>QUOTE</b> this message "
-                        f"and reply with your <b>Payment Details</b>.\n\n"
-                        f"Please make sure that all details are correct to "
-                        f"avoid any payment issues."
-                    )
+                payment_msg = build_payment_details_prompt(
+                    deal_id, seller_part, deal.get('payment_method', '')
+                )
 
                 sent_msg = await context.bot.send_message(
                     chat_id=chat_id,
