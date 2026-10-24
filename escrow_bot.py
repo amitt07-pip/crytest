@@ -5278,7 +5278,7 @@ async def handle_message(
                 seller_part = format_party_link(
                     seller_name, seller_id, "seller"
                 )
-                if "UPI" in str(deal.get('payment_method', '')):
+                if "upi" in str(deal.get('payment_method', '')).lower():
                     payment_msg = (
                         f"<b><u>Deal</u></b> #{deal_id}\n\n"
                         f"{seller_part}, please <b>QUOTE</b> this message "
