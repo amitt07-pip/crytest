@@ -5278,16 +5278,25 @@ async def handle_message(
                 seller_part = format_party_link(
                     seller_name, seller_id, "seller"
                 )
-                payment_msg = (
-                    f"<b><u>Deal</u></b> #{deal_id}\n\n"
-                    f"{seller_part}, please <b>QUOTE</b> this message "
-                    f"and reply with your <b>Payment Details.</b>\n\n"
-                    f"Format:\n\n"
-                    f"➤ <b>UPI Payment:</b>\n"
-                    f"<code>UPI ID:</code>\n\n"
-                    f"Please make sure that all details are correct to avoid "
-                    f"any payment issues."
-                )
+                if "UPI" in str(deal.get('payment_method', '')):
+                    payment_msg = (
+                        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                        f"{seller_part}, please <b>QUOTE</b> this message "
+                        f"and reply with your <b>Payment Details.</b>\n\n"
+                        f"Format:\n\n"
+                        f"➤ <b>UPI Payment:</b>\n"
+                        f"<code>UPI ID:</code>\n\n"
+                        f"Please make sure that all details are correct to "
+                        f"avoid any payment issues."
+                    )
+                else:
+                    payment_msg = (
+                        f"<b><u>Deal</u></b> #{deal_id}\n\n"
+                        f"{seller_part}, please <b>QUOTE</b> this message "
+                        f"and reply with your <b>Payment Details</b>.\n\n"
+                        f"Please make sure that all details are correct to "
+                        f"avoid any payment issues."
+                    )
 
                 sent_msg = await context.bot.send_message(
                     chat_id=chat_id,
