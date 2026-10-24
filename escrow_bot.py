@@ -5281,7 +5281,10 @@ async def handle_message(
                 payment_msg = (
                     f"<b><u>Deal</u></b> #{deal_id}\n\n"
                     f"{seller_part}, please <b>QUOTE</b> this message "
-                    f"and reply with your <b>Payment Details</b>.\n\n"
+                    f"and reply with your <b>Payment Details.</b>\n\n"
+                    f"Format:\n\n"
+                    f"➤ <b>UPI Payment:</b>\n"
+                    f"<code>UPI ID:</code>\n\n"
                     f"Please make sure that all details are correct to avoid "
                     f"any payment issues."
                 )
