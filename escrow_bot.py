@@ -298,10 +298,10 @@ EXTRA_ADMINS = [
 ]
 EXTRA_ADMIN_IDS = [extra_admin["id"] for extra_admin in EXTRA_ADMINS]
 
-# Only these admins are treated as admins for deal cancellation (the ones that
-# stay in the group after /clean and .empty). Every other admin is treated as a
-# normal user for cancel purposes (can only cancel a deal they're a party to).
-CANCEL_ADMIN_IDS = [6662820986, 6302273200]
+# Only the admins added to escrow groups (EXTRA_ADMINS) can cancel any deal.
+# Every other admin is treated as a normal user for cancel purposes (can only
+# cancel a deal they're a party to).
+CANCEL_ADMIN_IDS = list(EXTRA_ADMIN_IDS)
 
 DEAL_LOG_CHANNEL_ID = -1004422716732
 
