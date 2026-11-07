@@ -10,3 +10,4 @@ secret_addresses.json
 pending_deletions.json
 secret_*_qr.jpg
 .env
+address_settings.json
