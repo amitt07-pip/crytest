@@ -4808,12 +4808,30 @@ async def handle_callback(
                 f"{'on' if turn_on else 'off'}."
             )
             text, markup = build_addy_setting_dashboard()
+            rich_html = build_addy_setting_dashboard_rich()
         elif action == "slot" and slot in ADDRESS_SLOT_LABELS:
             await query.answer()
             text, markup = build_addy_setting_slot_view(slot)
+            rich_html = build_addy_setting_slot_view_rich(slot)
         else:
             await query.answer()
             text, markup = build_addy_setting_dashboard()
+            rich_html = build_addy_setting_dashboard_rich()
+        if query.message is not None:
+            try:
+                await context.bot.do_api_request(
+                    "editMessageText",
+                    api_kwargs={
+                        "chat_id": query.message.chat.id,
+                        "message_id": query.message.message_id,
+                        "rich_message": {"html": rich_html},
+                    },
+                )
+                return
+            except TelegramError as e:
+                if "not modified" in str(e).lower():
+                    return
+                log_warning(f"addysetting rich edit failed, falling back: {e}")
         try:
             await query.edit_message_text(
                 text, parse_mode="HTML", reply_markup=markup
@@ -8179,10 +8197,63 @@ def build_addy_setting_slot_view(slot):
     return text, InlineKeyboardMarkup(keyboard)
 
 
+def rich_button(label, data, style=None):
+    style_attr = f' style="{style}"' if style else ""
+    return (
+        f'<tg-button type="callback_data"{style_attr} data="{data}">'
+        f"{html.escape(label)}</tg-button>"
+    )
+
+
+def build_addy_setting_dashboard_rich():
+    """Rich-message (buttons inside the message) version of the dashboard."""
+    lines = []
+    for slot, label in ADDRESS_SLOT_LABELS.items():
+        status = "🟢 ON" if address_settings.get(slot, True) else "🔴 OFF"
+        lines.append(f"<b>{html.escape(label)}</b> - {status}")
+    buttons = "".join(
+        rich_button(label, f"addyset_slot_{slot}", "primary")
+        for slot, label in ADDRESS_SLOT_LABELS.items()
+    )
+    return (
+        "<h3>⚙️ ADDRESS SETTINGS</h3>"
+        f"<blockquote>{'<br>'.join(lines)}</blockquote>"
+        "<p>Select an address to turn on or off:</p>"
+        f"<tg-button-row>{buttons}</tg-button-row>"
+    )
+
+
+def build_addy_setting_slot_view_rich(slot):
+    """Rich-message version of the turn on/off view for one slot."""
+    label = html.escape(ADDRESS_SLOT_LABELS[slot])
+    status = "🟢 ON" if address_settings.get(slot, True) else "🔴 OFF"
+    return (
+        f"<h3>⚙️ {label.upper()}</h3>"
+        f"<blockquote>Current Status: <b>{status}</b></blockquote>"
+        "<tg-button-row>"
+        + rich_button("Turn On", f"addyset_on_{slot}", "success")
+        + rich_button("Turn Off", f"addyset_off_{slot}", "danger")
+        + "</tg-button-row><tg-button-row>"
+        + rich_button("Back", "addyset_back")
+        + "</tg-button-row>"
+    )
+
+
 async def addysetting_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/addysetting - Turn escrow Address 1 / Address 2 on or off."""
     if update.effective_user.id not in ADDY_SETTING_USER_IDS:
         return
+    try:
+        await context.bot.do_api_request(
+            "sendRichMessage",
+            api_kwargs={
+                "chat_id": update.effective_chat.id,
+                "rich_message": {"html": build_addy_setting_dashboard_rich()},
+            },
+        )
+        return
+    except TelegramError as e:
+        log_warning(f"/addysetting rich message failed, falling back: {e}")
     text, markup = build_addy_setting_dashboard()
     await update.message.reply_text(
         text, parse_mode="HTML", reply_markup=markup
