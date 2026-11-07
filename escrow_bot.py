@@ -8212,14 +8212,15 @@ def build_addy_setting_dashboard_rich():
         status = "🟢 ON" if address_settings.get(slot, True) else "🔴 OFF"
         lines.append(f"<b>{html.escape(label)}</b> - {status}")
     buttons = "".join(
-        rich_button(label, f"addyset_slot_{slot}", "primary")
+        f'<tg-button-row>{rich_button(label, f"addyset_slot_{slot}", "primary")}'
+        "</tg-button-row>"
         for slot, label in ADDRESS_SLOT_LABELS.items()
     )
     return (
         "<h3>⚙️ ADDRESS SETTINGS</h3>"
         f"<blockquote>{'<br>'.join(lines)}</blockquote>"
         "<p>Select an address to turn on or off:</p>"
-        f"<tg-button-row>{buttons}</tg-button-row>"
+        + buttons
     )
 
 
@@ -8232,6 +8233,7 @@ def build_addy_setting_slot_view_rich(slot):
         f"<blockquote>Current Status: <b>{status}</b></blockquote>"
         "<tg-button-row>"
         + rich_button("Turn On", f"addyset_on_{slot}", "success")
+        + "</tg-button-row><tg-button-row>"
         + rich_button("Turn Off", f"addyset_off_{slot}", "danger")
         + "</tg-button-row><tg-button-row>"
         + rich_button("Back", "addyset_back")
