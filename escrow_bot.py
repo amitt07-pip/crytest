@@ -47,6 +47,7 @@ from telegram import (  # noqa: E402
     MessageEntity,
     InlineQueryResultArticle, InputTextMessageContent
 )
+from telegram.error import TelegramError  # noqa: E402
 from telegram.ext import (  # noqa: E402
     ApplicationBuilder, CommandHandler, ContextTypes,
     ChatJoinRequestHandler, CallbackQueryHandler, MessageHandler, filters,
@@ -94,6 +95,7 @@ HIDDEN_DEALS_FILE = os.path.join(BASE_DIR, "hidden_deals.json")
 PROFILE_OVERRIDES_FILE = os.path.join(BASE_DIR, "profile_overrides.json")
 SECRET_ADDRESSES_FILE = os.path.join(BASE_DIR, "secret_addresses.json")
 PENDING_DELETIONS_FILE = os.path.join(BASE_DIR, "pending_deletions.json")
+ADDRESS_SETTINGS_FILE = os.path.join(BASE_DIR, "address_settings.json")
 
 # Default addresses and QR images (used if escrow_addresses.json doesn't exist)
 _DEFAULT_ADDRESSES = {
@@ -364,6 +366,9 @@ user_2fa = {}
 deal_form_cache = {}
 force_escrow_users = {}
 work_chats = []
+address_settings = {"1": True, "2": True}
+ADDY_SETTING_USER_IDS = {8900676903}
+ADDRESS_SLOT_LABELS = {"1": "Address 1 [Amit]", "2": "Address 2 [Others]"}
 deal_history = {}
 hidden_volume_users = {}
 hidden_deal_users = {}
@@ -537,6 +542,36 @@ def load_pending_deletions():
 def save_pending_deletions():
     with open(PENDING_DELETIONS_FILE, "w") as f:
         json.dump(pending_deletions, f)
+
+
+def load_address_settings():
+    global address_settings
+    address_settings = {"1": True, "2": True}
+    try:
+        with open(ADDRESS_SETTINGS_FILE, "r") as f:
+            loaded_settings = json.load(f)
+        if isinstance(loaded_settings, dict):
+            for slot in address_settings:
+                if slot in loaded_settings:
+                    address_settings[slot] = bool(loaded_settings[slot])
+    except (FileNotFoundError, TypeError, ValueError):
+        pass
+
+
+def save_address_settings():
+    with open(ADDRESS_SETTINGS_FILE, "w") as f:
+        json.dump(address_settings, f)
+
+
+def apply_address_settings(fixed_index):
+    """Force the deposit address index onto the only enabled slot, if one is off."""
+    slot1_on = address_settings.get("1", True)
+    slot2_on = address_settings.get("2", True)
+    if slot1_on and not slot2_on:
+        return 0
+    if slot2_on and not slot1_on:
+        return 1
+    return fixed_index
 
 
 def load_work_chats():
@@ -1813,6 +1848,8 @@ async def build_deposit_message(deal, deal_id, bot):
     else:
         # Check if admin has pre-fixed an address index
         fixed_index = deal.get('fixed_address_index')
+        if not deal.get('address_forced'):
+            fixed_index = apply_address_settings(fixed_index)
 
         if deal.get('secret_address'):
             secret = secret_addresses.get(secret_address_key(currency, network))
@@ -4749,6 +4786,43 @@ async def handle_callback(
             return
 
     # Handle setaddy callback (admin setting specific address for a deal)
+    if data.startswith("addyset_"):
+        if user_id not in ADDY_SETTING_USER_IDS:
+            await query.answer("You can't use this!")
+            return
+        parts = data.split("_")
+        action = parts[1]
+        slot = parts[2] if len(parts) > 2 else None
+        if action in ("on", "off") and slot in ADDRESS_SLOT_LABELS:
+            turn_on = action == "on"
+            other_slot = "2" if slot == "1" else "1"
+            if not turn_on and not address_settings.get(other_slot, True):
+                await query.answer(
+                    "At least one address must stay on!", show_alert=True
+                )
+                return
+            address_settings[slot] = turn_on
+            save_address_settings()
+            await query.answer(
+                f"{ADDRESS_SLOT_LABELS[slot]} turned "
+                f"{'on' if turn_on else 'off'}."
+            )
+            text, markup = build_addy_setting_dashboard()
+        elif action == "slot" and slot in ADDRESS_SLOT_LABELS:
+            await query.answer()
+            text, markup = build_addy_setting_slot_view(slot)
+        else:
+            await query.answer()
+            text, markup = build_addy_setting_dashboard()
+        try:
+            await query.edit_message_text(
+                text, parse_mode="HTML", reply_markup=markup
+            )
+        except TelegramError as e:
+            if "not modified" not in str(e).lower():
+                raise
+        return
+
     if data.startswith("setaddy_"):
         user_id = query.from_user.id
         if user_id not in ADMIN_USER_IDS:
@@ -4785,6 +4859,7 @@ async def handle_callback(
 
         # Set the fixed address index (this will be used when network is selected)
         deal['fixed_address_index'] = address_index
+        deal['address_forced'] = True
         
         # If network is already selected, also update the deposit_address and qr_image immediately
         if network:
@@ -8062,6 +8137,58 @@ async def backup_addy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+def build_addy_setting_dashboard():
+    """Dashboard text and buttons for /addysetting."""
+    lines = []
+    for slot, label in ADDRESS_SLOT_LABELS.items():
+        status = "🟢 ON" if address_settings.get(slot, True) else "🔴 OFF"
+        lines.append(f"• <b>{label}</b> - {status}")
+    text = (
+        "<b>⚙️ ADDRESS SETTINGS</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        + "\n".join(lines)
+        + "\n\nSelect an address to turn on or off:"
+    )
+    keyboard = [
+        [InlineKeyboardButton(
+            label, callback_data=f"addyset_slot_{slot}", style="primary"
+        )]
+        for slot, label in ADDRESS_SLOT_LABELS.items()
+    ]
+    return text, InlineKeyboardMarkup(keyboard)
+
+
+def build_addy_setting_slot_view(slot):
+    """Turn on/off view for one address slot in /addysetting."""
+    label = ADDRESS_SLOT_LABELS[slot]
+    status = "🟢 ON" if address_settings.get(slot, True) else "🔴 OFF"
+    text = (
+        f"<b>⚙️ {label.upper()}</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Current Status: <b>{status}</b>"
+    )
+    keyboard = [
+        [InlineKeyboardButton(
+            "Turn On", callback_data=f"addyset_on_{slot}", style="success"
+        )],
+        [InlineKeyboardButton(
+            "Turn Off", callback_data=f"addyset_off_{slot}", style="danger"
+        )],
+        [InlineKeyboardButton("Back", callback_data="addyset_back")],
+    ]
+    return text, InlineKeyboardMarkup(keyboard)
+
+
+async def addysetting_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """/addysetting - Turn escrow Address 1 / Address 2 on or off."""
+    if update.effective_user.id not in ADDY_SETTING_USER_IDS:
+        return
+    text, markup = build_addy_setting_dashboard()
+    await update.message.reply_text(
+        text, parse_mode="HTML", reply_markup=markup
+    )
+
+
 async def changeaddy_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/changeaddy - Admin command to change escrow deposit addresses."""
     user_id = update.effective_user.id
@@ -9222,6 +9349,7 @@ async def main():
     load_profile_overrides()
     load_secret_addresses()
     load_pending_deletions()
+    load_address_settings()
 
     # Load escrow addresses from JSON (permanent storage)
     addr_data = load_escrow_addresses()
@@ -9294,6 +9422,7 @@ async def main():
     app.add_handler(CommandHandler("manualadd", manual_add))
     app.add_handler(CommandHandler("changeaddy", changeaddy_command))
     app.add_handler(CommandHandler("addylist", wallets_command))
+    app.add_handler(CommandHandler("addysetting", addysetting_command))
     app.add_handler(CommandHandler("setsecretaddy", set_secret_addy))
     app.add_handler(CommandHandler("backupaddy", backup_addy))
     app.add_handler(MessageHandler(filters.Regex(r'^\.review\b'), review_rooms))
